@@ -4,6 +4,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import path from 'path';
+import { parse as parseYaml } from 'yaml';
 import { CONTENT_CONFIG, PATHS } from '../constants.js';
 import type { ProjectConfig } from '../types/index.js';
 import logger from '../utils/logger.js';
@@ -46,72 +47,6 @@ const DEFAULT_CONFIG: Partial<ProjectConfig> = {
     x: true,
   },
 };
-
-/**
- * Parse YAML-like config (simple key-value)
- * For production, use a proper YAML parser
- */
-function parseYaml(content: string): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  const lines = content.split('\n');
-  let currentKey = '';
-  let currentIndent = 0;
-  const stack: Array<{ obj: Record<string, unknown>; indent: number }> = [
-    { obj: result, indent: -1 },
-  ];
-
-  for (const rawLine of lines) {
-    const line = rawLine;
-    if (!line.trim() || line.trim().startsWith('#')) continue;
-
-    const indent = line.search(/\S/);
-    const trimmed = line.trim();
-
-    // Handle list items
-    if (trimmed.startsWith('- ')) {
-      const value = trimmed.slice(2).trim();
-      const parent = stack[stack.length - 1].obj;
-      if (!Array.isArray(parent[currentKey])) {
-        parent[currentKey] = [];
-      }
-      (parent[currentKey] as unknown[]).push(value.replace(/^["']|["']$/g, ''));
-      continue;
-    }
-
-    // Handle key-value pairs
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex === -1) continue;
-
-    const key = trimmed.slice(0, colonIndex).trim();
-    const value = trimmed.slice(colonIndex + 1).trim();
-
-    // Pop stack if we're moving back up
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
-      stack.pop();
-    }
-
-    const current = stack[stack.length - 1].obj;
-
-    if (value === '' || value === '|') {
-      // Nested object
-      current[key] = {};
-      stack.push({ obj: current[key] as Record<string, unknown>, indent });
-      currentKey = key;
-      currentIndent = indent;
-    } else {
-      // Simple value
-      let parsed: unknown = value.replace(/^["']|["']$/g, '');
-      if (parsed === 'true') parsed = true;
-      else if (parsed === 'false') parsed = false;
-      else if (/^\d+$/.test(parsed as string)) parsed = parseInt(parsed as string, 10);
-      else if (/^\d+\.\d+$/.test(parsed as string)) parsed = parseFloat(parsed as string);
-      current[key] = parsed;
-      currentKey = key;
-    }
-  }
-
-  return result;
-}
 
 /**
  * Deep merge two objects.
