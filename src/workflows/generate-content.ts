@@ -52,6 +52,14 @@ async function processEvent(event: GitHubEvent): Promise<void> {
     return;
   }
 
+  // Check commit count limit (for PRs) - skip large PRs
+  const commitCount = event.commits.length;
+  const maxCommits = (projectConfig as any).triggers?.maxCommitsForGeneration || 10;
+  if (commitCount > maxCommits) {
+    logger.info(`PR has ${commitCount} commits (max: ${maxCommits}), skipping - too large for focused content`);
+    return;
+  }
+
   // Build context
   const context = githubService.buildContext(projectConfig.id, event);
 

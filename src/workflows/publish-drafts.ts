@@ -4,7 +4,7 @@
  */
 
 import { RATE_LIMITS } from '../constants.js';
-import { storageService, telegramService, xService } from '../services/index.js';
+import { configService, imageService, storageService, telegramService, xService } from '../services/index.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -20,6 +20,9 @@ async function publishApproved(): Promise<void> {
 
   logger.info(`Found ${approved.length} approved drafts to publish`);
 
+  // Load project configs for image settings
+  configService.loadAll();
+
   let published = 0;
   const maxToPublish = Math.min(approved.length, RATE_LIMITS.X_DAILY_LIMIT);
 
@@ -30,7 +33,35 @@ async function publishApproved(): Promise<void> {
     try {
       logger.info(`Publishing draft ${draft.id}...`);
 
-      const result = await xService.publishDraft(draft);
+      // Check if we should generate an image
+      const projectConfig = configService.get(draft.projectId);
+      const shouldGenerateImage = projectConfig?.thread?.alwaysGenerateImage ?? false;
+
+      let mediaId: string | undefined;
+
+      if (shouldGenerateImage && draft.content.tweets.length > 0) {
+        try {
+          // Generate image based on first tweet content
+          const imagePrompt = imageService.buildImagePrompt(
+            draft.projectId,
+            draft.content.tweets[0].text
+          );
+
+          logger.info('Generating image for post...', { projectId: draft.projectId });
+          const image = await imageService.generateImage(imagePrompt);
+
+          // Upload to X
+          logger.info('Uploading image to X...');
+          mediaId = await xService.uploadMedia(image.data);
+          logger.info('Image uploaded successfully', { mediaId });
+        } catch (imageError) {
+          logger.warn('Failed to generate/upload image, publishing without it', { error: imageError });
+          // Continue publishing without image
+        }
+      }
+
+      // Publish with optional media
+      const result = await xService.publishDraftWithMedia(draft, mediaId);
 
       draft.publishedTweetId = result.tweetIds[0];
       draft.publishedTweetIds = result.tweetIds;

@@ -6,14 +6,15 @@ name: Commit Content Tracker
 repository: amitayks/commit-content-creatore
 enabled: true
 
-# Trigger settings
+# Trigger settings - ONLY merged PRs, not every push
 triggers:
   branches:
     - main
     - release/*
   events:
-    - pr_merged
-    - push
+    - pr_merged  # Only merged PRs, removed 'push'
+  # Only generate for PRs with 1-3 commits (focused changes)
+  maxCommitsForGeneration: 3
 
 # Content generation preferences
 content:
@@ -41,7 +42,7 @@ formatting:
 thread:
   minCommitsForThread: 2
   maxTweets: 10
-  alwaysGenerateImage: true
+  alwaysGenerateImage: true  # Enable AI image generation
   singleTweetImageProbability: 0.7
 
 # Debounce settings

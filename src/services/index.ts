@@ -9,3 +9,4 @@ export { StorageService, storageService } from './storage.service.js';
 export type { TelegramUpdate } from './telegram.service.js';
 export { TelegramService, telegramService } from './telegram.service.js';
 export { XService, xService } from './x.service.js';
+export { imageService } from './image.service.js';

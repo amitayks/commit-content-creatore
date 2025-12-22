@@ -6,12 +6,10 @@
         "lib": [
             "ES2021"
         ],
-        "types": [
-            "@cloudflare/workers-types"
-        ],
         "strict": true,
         "noEmit": true,
-        "skipLibCheck": true
+        "skipLibCheck": true,
+        "esModuleInterop": true
     },
     "include": [
         "src/**/*"

@@ -6,7 +6,7 @@ import crypto from 'crypto';
 import { API_KEYS, RATE_LIMITS } from '../constants.js';
 import type { Draft, Tweet } from '../types/index.js';
 import logger from '../utils/logger.js';
-import { isRateLimitError, retryWithBackoff, sleep } from '../utils/retry.js';
+import { defaultApiRetryCondition, isRateLimitError, retryWithBackoff, sleep } from '../utils/retry.js';
 
 /** X API response for tweet creation */
 interface TweetResponse {
@@ -222,6 +222,48 @@ export class XService {
   }
 
   /**
+   * Publish a draft to X with an optional media attachment for the first tweet.
+   */
+  async publishDraftWithMedia(
+    draft: Draft,
+    mediaId?: string
+  ): Promise<{ tweetIds: string[]; url: string }> {
+    logger.info(`Publishing draft to X`, {
+      draftId: draft.id,
+      format: draft.content.format,
+      hasMedia: !!mediaId,
+    });
+
+    const tweetIds: string[] = [];
+    let previousId: string | undefined;
+
+    for (let i = 0; i < draft.content.tweets.length; i++) {
+      const tweet = draft.content.tweets[i];
+
+      // Add delay between tweets
+      if (i > 0) {
+        await sleep(1000);
+      }
+
+      // Only attach media to the first tweet
+      const mediaIds = i === 0 && mediaId ? [mediaId] : undefined;
+
+      const tweetId = await this.postTweet(tweet.text, {
+        replyToId: previousId,
+        mediaIds,
+      });
+
+      tweetIds.push(tweetId);
+      previousId = tweetId;
+
+      logger.info(`Posted tweet ${i + 1}/${draft.content.tweets.length}`, { tweetId });
+    }
+
+    const url = `https://x.com/i/web/status/${tweetIds[0]}`;
+    return { tweetIds, url };
+  }
+
+  /**
    * Delete a tweet.
    */
   async deleteTweet(tweetId: string): Promise<void> {
@@ -263,6 +305,51 @@ export class XService {
    */
   getTweetUrl(tweetId: string): string {
     return `https://x.com/i/web/status/${tweetId}`;
+  }
+
+  /**
+   * Upload media (image) to X.
+   * Uses the v1.1 media upload endpoint which requires form-urlencoded data.
+   */
+  async uploadMedia(imageBuffer: Buffer): Promise<string> {
+    return retryWithBackoff(
+      async () => {
+        const uploadUrl = 'https://upload.twitter.com/1.1/media/upload.json';
+        const authHeader = this.generateOAuthHeader('POST', uploadUrl);
+
+        // Convert buffer to base64
+        const base64Data = imageBuffer.toString('base64');
+
+        // Use form-urlencoded for media upload
+        const body = new URLSearchParams({
+          media_data: base64Data,
+        });
+
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+          throw new Error(`X Media Upload error ${response.status}: ${error}`);
+        }
+
+        const data = (await response.json()) as { media_id_string: string };
+
+        if (!data.media_id_string) {
+          throw new Error('No media_id_string in response');
+        }
+
+        logger.info('Uploaded media to X', { mediaId: data.media_id_string });
+        return data.media_id_string;
+      },
+      { shouldRetry: defaultApiRetryCondition, context: 'uploadMedia', maxRetries: 2 }
+    );
   }
 }
 

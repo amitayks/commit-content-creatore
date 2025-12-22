@@ -1,6 +1,8 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.3.10/schema.json",
-  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "organizeImports": {
+    "enabled": true
+  },
   "linter": {
     "enabled": true,
     "rules": {
@@ -27,6 +29,11 @@
     }
   },
   "files": {
-    "includes": ["**", "!**/node_modules", "!**/dist", "!**/data"]
+    "ignore": [
+      "**/node_modules",
+      "**/dist",
+      "**/data",
+      "**/cloudflare-worker"
+    ]
   }
 }
