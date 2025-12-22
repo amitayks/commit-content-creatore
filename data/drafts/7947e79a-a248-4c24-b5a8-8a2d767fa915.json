@@ -1,0 +1,37 @@
+{
+  "projectId": "commit-content-tracker",
+  "status": "draft",
+  "source": {
+    "type": "push",
+    "url": "https://github.com/amitayks/commit-content-creatore/commit/2b5819b",
+    "ref": "main",
+    "commits": [
+      "2b5819b2a3a6003a44d2dec0d1e5588595346543"
+    ]
+  },
+  "content": {
+    "format": "thread",
+    "tweets": [
+      {
+        "text": "🚀 Excited to announce the initial release of Commit Content Tracker! An AI-powered tool that turns your GitHub commits & PRs into engaging X threads automatically. Built with TypeScript, running serverlessly on GitHub Actions. Let’s dive in! 👇 #DevTools"
+      },
+      {
+        "text": "🔗 It integrates with GitHub webhooks to catch push & PR events in real-time. No manual effort—just code, commit, and watch the magic happen. Perfect for devs who want to share their work effortlessly. 🛠️"
+      },
+      {
+        "text": "🧠 Powered by Grok API, it generates human-like X content. Plus, a Telegram bot lets you review drafts before posting. Full control, zero stress. How cool is that? 😎"
+      },
+      {
+        "text": "📢 Supports multi-project configs & publishes full threads on X. Whether you’re a solo dev or managing a team, this tool scales with you. Check it out: https://github.com/amitayks/commit-content-creatore/commit/2b5819b"
+      },
+      {
+        "text": "What do you think? Could this save you time sharing your dev journey? Drop your thoughts or ideas below—I’d love to hear! 💬 #DevTools #Automation #AI #CommitContentTracker #GitHub #TypeScript"
+      }
+    ]
+  },
+  "id": "7947e79a-a248-4c24-b5a8-8a2d767fa915",
+  "createdAt": "2025-12-22T21:31:06.361Z",
+  "updatedAt": "2025-12-22T21:31:06.361Z",
+  "regenerationCount": 0,
+  "telegramMessageId": 49
+}
