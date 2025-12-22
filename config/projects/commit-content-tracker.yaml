@@ -1,0 +1,65 @@
+# Project Configuration: Commit Content Tracker
+# This project tracks its own development and creates X threads about new features
+
+id: commit-content-tracker
+name: Commit Content Tracker
+repository: amitayks/commit-content-creatore
+
+# Trigger settings
+triggers:
+  branches:
+    - main
+    - release/*
+  events:
+    - pr_merge
+    - push
+
+# Content generation preferences
+content:
+  # Types of content to generate
+  types:
+    - feature_announcement  # New capabilities added
+    - technical_deep_dive   # How things work under the hood
+    - learning_share        # Lessons learned during development
+    - dev_update           # General development progress
+
+  # Tone and style
+  tone: enthusiastic
+  style: conversational
+  includeEmojis: true
+  includeHashtags: true
+
+  # Topics to highlight
+  focusAreas:
+    - AI integration
+    - GitHub automation
+    - Social media automation
+    - Developer tools
+    - TypeScript development
+
+# Thread formatting
+formatting:
+  # Project branding
+  projectTag: "#CommitContentTracker"
+  additionalTags:
+    - "#DevTools"
+    - "#Automation"
+    - "#AI"
+    - "#GitHub"
+    - "#TypeScript"
+  
+  # Thread preferences
+  maxTweetsPerThread: 10
+  includeCodeSnippets: true
+  includeSourceLinks: true
+
+# Image generation
+images:
+  enabled: true
+  style: modern tech aesthetic with dark theme
+  includeForSingleTweets: true
+
+# Debounce settings
+debounce:
+  pushEventsMinutes: 30
+  prMergeImmediate: true

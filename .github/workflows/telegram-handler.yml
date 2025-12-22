@@ -1,0 +1,48 @@
+name: Telegram Bot Handler
+
+on:
+  repository_dispatch:
+    types: [telegram_update]
+
+  # Allow manual trigger for testing
+  workflow_dispatch:
+    inputs:
+      payload:
+        description: 'Telegram update JSON payload'
+        required: false
+        type: string
+
+jobs:
+  handle:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Handle Telegram update
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GROK_API_KEY: ${{ secrets.GROK_API_KEY }}
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          TELEGRAM_WEBHOOK_PAYLOAD: ${{ github.event.client_payload.update || inputs.payload }}
+        run: npm run telegram
+
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore: update drafts from Telegram'
+          file_pattern: 'data/**/*.json'
