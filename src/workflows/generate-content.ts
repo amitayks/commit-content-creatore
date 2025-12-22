@@ -153,6 +153,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  logger.error('Workflow failed', { error });
+  const message = error instanceof Error ? error.message : String(error);
+  const stack = error instanceof Error ? error.stack : undefined;
+  logger.error('Workflow failed', { message, stack });
   process.exit(1);
 });

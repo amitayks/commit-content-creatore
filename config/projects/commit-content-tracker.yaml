@@ -4,6 +4,7 @@
 id: commit-content-tracker
 name: Commit Content Tracker
 repository: amitayks/commit-content-creatore
+enabled: true
 
 # Trigger settings
 triggers:
@@ -11,55 +12,43 @@ triggers:
     - main
     - release/*
   events:
-    - pr_merge
+    - pr_merged
     - push
 
 # Content generation preferences
 content:
-  # Types of content to generate
   types:
-    - feature_announcement  # New capabilities added
-    - technical_deep_dive   # How things work under the hood
-    - learning_share        # Lessons learned during development
-    - dev_update           # General development progress
-
-  # Tone and style
+    - feature_announcement
+    - technical_deep_dive
+    - learning_share
+    - dev_update
   tone: enthusiastic
-  style: conversational
-  includeEmojis: true
-  includeHashtags: true
 
-  # Topics to highlight
-  focusAreas:
-    - AI integration
-    - GitHub automation
-    - Social media automation
-    - Developer tools
-    - TypeScript development
-
-# Thread formatting
+# Formatting options
 formatting:
-  # Project branding
-  projectTag: "#CommitContentTracker"
-  additionalTags:
-    - "#DevTools"
-    - "#Automation"
-    - "#AI"
-    - "#GitHub"
-    - "#TypeScript"
-  
-  # Thread preferences
-  maxTweetsPerThread: 10
-  includeCodeSnippets: true
-  includeSourceLinks: true
+  emojis: true
+  hashtags:
+    always:
+      - "#DevTools"
+      - "#Automation"
+      - "#AI"
+    project:
+      - "#CommitContentTracker"
+      - "#GitHub"
+      - "#TypeScript"
 
-# Image generation
-images:
-  enabled: true
-  style: modern tech aesthetic with dark theme
-  includeForSingleTweets: true
+# Thread settings
+thread:
+  minCommitsForThread: 2
+  maxTweets: 10
+  alwaysGenerateImage: true
+  singleTweetImageProbability: 0.7
 
 # Debounce settings
 debounce:
-  pushEventsMinutes: 30
-  prMergeImmediate: true
+  pushDebounceMinutes: 30
+  prImmediate: true
+
+# Platforms
+platforms:
+  x: true
