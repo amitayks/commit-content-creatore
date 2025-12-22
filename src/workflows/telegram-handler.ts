@@ -163,6 +163,58 @@ async function handleMessage(text: string, replyToMessageId?: number): Promise<v
         break;
       }
 
+      case '/generate': {
+        // Trigger content generation for a specific commit
+        const parts = text.split(' ');
+        const commitSha = parts[1]?.trim();
+
+        if (!commitSha) {
+          await telegramService.notify(
+            `🔧 <b>Generate Content</b>\n\nUsage: <code>/generate &lt;commit_sha&gt;</code>\n\nExample: <code>/generate 2b5819b</code>\n\nThis will trigger AI content generation for the specified commit.`
+          );
+          break;
+        }
+
+        // Trigger GitHub workflow dispatch
+        await telegramService.notify(`🚀 Triggering content generation for commit: <code>${commitSha}</code>`);
+
+        try {
+          const repo = process.env.GITHUB_REPOSITORY || 'amitayks/commit-content-creatore';
+          const [owner, repoName] = repo.split('/');
+          const token = process.env.GH_PAT;
+
+          const response = await fetch(
+            `https://api.github.com/repos/${owner}/${repoName}/actions/workflows/generate-content.yml/dispatches`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                Accept: 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                ref: 'main',
+                inputs: {
+                  commit_sha: commitSha,
+                },
+              }),
+            }
+          );
+
+          if (response.ok || response.status === 204) {
+            await telegramService.notify(
+              `✅ Workflow triggered successfully!\n\nContent generation for <code>${commitSha}</code> is in progress. You'll receive a notification when the draft is ready.`
+            );
+          } else {
+            const error = await response.text();
+            await telegramService.notify(`❌ Failed to trigger workflow: ${response.status}\n<code>${error}</code>`);
+          }
+        } catch (error) {
+          await telegramService.notify(`❌ Error triggering workflow: ${error}`);
+        }
+        break;
+      }
+
       case '/help':
       default: {
         await telegramService.notify(`
@@ -172,6 +224,7 @@ async function handleMessage(text: string, replyToMessageId?: number): Promise<v
 /approved - Show approved drafts in queue
 /stats - Show content statistics
 /publish - Publish next approved draft
+/generate &lt;sha&gt; - Generate content for a specific commit
 /help - Show this help message
 
 <b>To edit a draft:</b>

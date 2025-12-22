@@ -10,7 +10,7 @@ import {
   storageService,
   telegramService,
 } from '../services/index.js';
-import type { ContentGenerationContext, DraftSource, GitHubEvent } from '../types/index.js';
+import type { ContentGenerationContext, DraftSource, GitHubEvent, GitHubPushEvent } from '../types/index.js';
 import logger from '../utils/logger.js';
 
 /**
@@ -115,36 +115,83 @@ async function processEvent(event: GitHubEvent): Promise<void> {
 }
 
 /**
+ * Build a manual push event from a specific commit SHA.
+ */
+async function buildManualEvent(commitSha: string): Promise<GitHubEvent> {
+  // Get repository info from environment
+  const repo = process.env.GITHUB_REPOSITORY || 'amitayks/commit-content-creatore';
+  const [owner, repoName] = repo.split('/');
+
+  logger.info(`Building manual event for commit ${commitSha} in ${repo}`);
+
+  const repository = await githubService.getRepository(owner, repoName);
+  const commit = await githubService.getCommit(owner, repoName, commitSha);
+
+  return {
+    type: 'push',
+    repository,
+    branch: 'main',
+    commits: [commit],
+    compareUrl: `https://github.com/${repo}/commit/${commitSha}`,
+    pusher: commit.author,
+    before: '',
+    after: commitSha,
+  } as GitHubPushEvent;
+}
+
+/**
  * Main workflow entry point.
  */
 async function main(): Promise<void> {
   logger.info('Content generation workflow started');
 
-  // Get event payload from environment (GitHub Actions)
-  const eventPath = process.env.GITHUB_EVENT_PATH;
+  // Check for manual commit SHA (workflow_dispatch)
+  const manualCommitSha = process.env.MANUAL_COMMIT_SHA;
   const eventName = process.env.GITHUB_EVENT_NAME;
-
-  if (!eventPath || !eventName) {
-    logger.error('Missing GitHub event information');
-    process.exit(1);
-  }
-
-  const { readFileSync } = await import('fs');
-  const payload = JSON.parse(readFileSync(eventPath, 'utf-8'));
 
   let event: GitHubEvent;
 
-  if (eventName === 'push') {
-    event = await githubService.parsePushEvent(payload);
-  } else if (
-    eventName === 'pull_request' &&
-    payload.action === 'closed' &&
-    payload.pull_request?.merged
-  ) {
-    event = await githubService.parsePREvent(payload);
+  if (manualCommitSha && manualCommitSha.trim()) {
+    // Manual trigger with specific commit
+    logger.info(`Manual trigger with commit: ${manualCommitSha}`);
+    event = await buildManualEvent(manualCommitSha.trim());
+  } else if (eventName === 'workflow_dispatch') {
+    // Manual trigger without commit - use latest
+    const repo = process.env.GITHUB_REPOSITORY || '';
+    const [owner, repoName] = repo.split('/');
+    const sha = process.env.GITHUB_SHA || '';
+
+    if (!sha) {
+      logger.info('No commit SHA provided for manual trigger, skipping');
+      return;
+    }
+
+    logger.info(`Manual trigger using current SHA: ${sha}`);
+    event = await buildManualEvent(sha);
   } else {
-    logger.info(`Ignoring event: ${eventName}`);
-    return;
+    // Normal event-based trigger
+    const eventPath = process.env.GITHUB_EVENT_PATH;
+
+    if (!eventPath || !eventName) {
+      logger.error('Missing GitHub event information');
+      process.exit(1);
+    }
+
+    const { readFileSync } = await import('fs');
+    const payload = JSON.parse(readFileSync(eventPath, 'utf-8'));
+
+    if (eventName === 'push') {
+      event = await githubService.parsePushEvent(payload);
+    } else if (
+      eventName === 'pull_request' &&
+      payload.action === 'closed' &&
+      payload.pull_request?.merged
+    ) {
+      event = await githubService.parsePREvent(payload);
+    } else {
+      logger.info(`Ignoring event: ${eventName}`);
+      return;
+    }
   }
 
   await processEvent(event);
@@ -158,3 +205,4 @@ main().catch((error) => {
   logger.error('Workflow failed', { message, stack });
   process.exit(1);
 });
+

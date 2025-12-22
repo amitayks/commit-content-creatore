@@ -10,18 +10,26 @@ on:
     branches:
       - main
 
-  # Allow manual trigger
+  # Allow manual trigger with optional commit SHA
   workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Specific commit SHA to generate content for (leave empty for latest)'
+        required: false
+        type: string
 
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Skip bot commits to prevent infinite loop, and only run for merged PRs or pushes
+    # Skip bot commits to prevent infinite loop (but always run for manual triggers)
     if: |
-      github.actor != 'github-actions[bot]' &&
-      !contains(github.event.head_commit.message, '[skip ci]') &&
-      !contains(github.event.head_commit.message, 'chore: save generated draft') &&
-      (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true))
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.actor != 'github-actions[bot]' &&
+        !contains(github.event.head_commit.message, '[skip ci]') &&
+        !contains(github.event.head_commit.message, 'chore: save generated draft') &&
+        (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true))
+      )
     
     permissions:
       contents: write
@@ -31,6 +39,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0  # Fetch all history for commit comparison
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -47,6 +56,7 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          MANUAL_COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
         run: npm run generate
 
       - name: Commit draft changes
