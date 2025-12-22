@@ -16,8 +16,12 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    # Only run for merged PRs or pushes
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    # Skip bot commits to prevent infinite loop, and only run for merged PRs or pushes
+    if: |
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, '[skip ci]') &&
+      !contains(github.event.head_commit.message, 'chore: save generated draft') &&
+      (github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true))
     
     permissions:
       contents: write
