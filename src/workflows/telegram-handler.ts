@@ -32,8 +32,13 @@ async function handleCallback(callbackId: string, data: string, messageId: numbe
     case 'approve': {
       const updated = await storageService.updateStatus(draftId, 'approved');
       if (updated) {
-        await telegramService.answerCallback(callbackId, '✅ Approved! Will be published soon.');
+        await telegramService.answerCallback(callbackId, '✅ Approved!');
         await telegramService.updateDraftMessage(updated, 'approved');
+        await telegramService.notify(
+          `✅ <b>Draft Approved!</b>\n\n` +
+          `📌 Use <code>/publish</code> to post to X now\n` +
+          `⏰ Or it will auto-publish within 4 hours`
+        );
       }
       break;
     }
@@ -43,6 +48,7 @@ async function handleCallback(callbackId: string, data: string, messageId: numbe
       if (updated) {
         await telegramService.answerCallback(callbackId, '❌ Rejected');
         await telegramService.updateDraftMessage(updated, 'rejected');
+        await telegramService.notify(`❌ Draft rejected and archived.`);
       }
       break;
     }

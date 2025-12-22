@@ -165,6 +165,10 @@ export class TelegramService {
 
     lines.push(`━━━━━━━━━━━━━━━━━━━━━━`);
     lines.push(`\n🆔 <code>${draft.id}</code>`);
+    lines.push(``);
+    lines.push(`<i>✅ Approve → Ready for /publish</i>`);
+    lines.push(`<i>🔄 Regenerate → New AI version</i>`);
+    lines.push(`<i>✏️ Edit → Reply with "1: new text"</i>`);
 
     return lines.join('\n');
   }
