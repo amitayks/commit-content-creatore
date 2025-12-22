@@ -1,0 +1,31 @@
+{
+  "projectId": "commit-content-tracker",
+  "status": "draft",
+  "source": {
+    "type": "push",
+    "url": "https://github.com/amitayks/commit-content-creatore/compare/8dd1f61cf680...d1a4422cfa8d",
+    "ref": "main",
+    "commits": [
+      "d1a4422cfa8df8c5e45040dd75ee2977cbb44ae9"
+    ]
+  },
+  "content": {
+    "format": "thread",
+    "tweets": [
+      {
+        "text": "🚀 Excited to announce a new feature in Commit Content Creator! I've added a /generate command to the Telegram bot for manual content generation. Now you can trigger content creation on-demand for your commits! #DevTools #Automation"
+      },
+      {
+        "text": "🔍 How it works: Use /generate in your Telegram chat, and the bot will analyze a specific commit (or the latest) and craft engaging content for X. Perfect for sharing updates without waiting for automated triggers! 🛠️"
+      },
+      {
+        "text": "💡 Why this matters: Manual control means more flexibility for devs. Want to highlight a specific change? Just trigger it! Curious how this can streamline your workflow? Drop your thoughts below! #AI #CommitContentTracker #GitHub #TypeScript"
+      }
+    ]
+  },
+  "id": "f362eb6c-9fdc-46aa-bc36-49ed7ca177ce",
+  "createdAt": "2025-12-22T21:20:19.065Z",
+  "updatedAt": "2025-12-22T21:20:19.065Z",
+  "regenerationCount": 0,
+  "telegramMessageId": 33
+}
