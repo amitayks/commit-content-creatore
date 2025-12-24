@@ -195,17 +195,22 @@ async function handlePushEvent(
         };
 
         // Generate content
+        console.log('Generating content...');
         const draftContent = await generateContent(env, contentSource);
+        console.log('Content generated. Tweets:', draftContent.tweets.length);
 
         // Save draft
+        console.log('Creating draft in DB...');
         const draftId = await createDraft(env, {
             pr_number: 0, // No PR for direct pushes
             pr_title: commit.message.split('\n')[0],
             commit_sha: commit.id,
             content: JSON.stringify(draftContent),
         });
+        console.log('Draft created:', draftId);
 
         // Send notification FIRST to avoid timeout
+        console.log('Sending notification to chat:', env.TELEGRAM_CHAT_ID);
         await sendNotification(
             env,
             'push',
@@ -216,6 +221,7 @@ async function handlePushEvent(
             draftContent,
             null // No image yet
         );
+        console.log('Notification sent successfully');
 
         // Try to generate image after notification (may timeout but notification is sent)
         const shouldGenImage = draftContent.format === 'thread'
