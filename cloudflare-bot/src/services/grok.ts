@@ -19,7 +19,7 @@ export async function generateContent(env: Env, source: ContentSource): Promise<
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: 'grok-4-1-fast-reasoning',
+            model: 'grok-3-fast',
             messages: [
                 {
                     role: 'system',
@@ -109,7 +109,7 @@ export async function editContent(
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: 'grok-4-1-fast-reasoning',
+            model: 'grok-3-fast',
             messages: [
                 {
                     role: 'system',
