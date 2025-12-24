@@ -478,30 +478,57 @@ export async function renderRepoConfig(env: Env, repoId: string): Promise<ViewRe
     const hashtagIcon = config.includeHashtags ? '✅' : '❌';
     const prIcon = config.watchPRs ? '✅' : '❌';
     const pushIcon = config.watchPushes ? '✅' : '❌';
+    const imgIcon = config.alwaysGenerateThreadImage ? '✅' : '❌';
+
+    // Code context labels
+    const contextLabels: Record<string, string> = {
+        'metadata': '📝 Meta',
+        'with_diff': '📊 +Diff',
+        'with_files': '📁 +Files',
+        'with_content': '⚠️ +Content',
+    };
+    const contextLabel = contextLabels[config.codeContext] || config.codeContext;
+
+    // Language labels
+    const langLabel = config.language === 'en' ? '🇺🇸 EN' : '🇮🇱 HE';
 
     return {
         text: `✏️ <b>Edit Configuration</b>
 
 <b>Repo:</b> <code>${repo.owner}/${repo.repo}</code>
 
-<b>Current Settings:</b>
+<b>Content Settings:</b>
 ${toneIcon} Tone: <b>${config.tone}</b>
-${hashtagIcon} Include Hashtags: <b>${config.includeHashtags ? 'Yes' : 'No'}</b>
-${prIcon} Watch PRs: <b>${config.watchPRs ? 'Yes' : 'No'}</b>
-${pushIcon} Watch Pushes: <b>${config.watchPushes ? 'Yes' : 'No'}</b>
+${hashtagIcon} Hashtags: <b>${config.includeHashtags ? 'Yes' : 'No'}</b>
+🌐 Language: <b>${config.language.toUpperCase()}</b>
+📦 Context: <b>${config.codeContext}</b>
+
+<b>Watch Settings:</b>
+${prIcon} PRs: <b>${config.watchPRs ? 'Yes' : 'No'}</b>
+${pushIcon} Pushes: <b>${config.watchPushes ? 'Yes' : 'No'}</b>
 📌 Branches: <b>${config.branches.join(', ')}</b>
+
+<b>Image Settings:</b>
+${imgIcon} Thread Image: <b>${config.alwaysGenerateThreadImage ? 'Always' : 'Off'}</b>
+🎲 Single Prob: <b>${Math.round(config.singleTweetImageProbability * 100)}%</b>
 
 Tap a setting to change it:`,
         keyboard: [
             [
-                { text: `🔄 Tone: ${config.tone}`, callback_data: `config:tone:${repo.id}` },
+                { text: `${toneIcon} Tone`, callback_data: `config:tone:${repo.id}` },
+                { text: langLabel, callback_data: `config:language:${repo.id}` },
             ],
             [
-                { text: `${hashtagIcon} Hashtags`, callback_data: `config:hashtags:${repo.id}` },
-                { text: `${prIcon} Watch PRs`, callback_data: `config:watchPRs:${repo.id}` },
+                { text: contextLabel, callback_data: `config:codeContext:${repo.id}` },
+                { text: `${hashtagIcon} Tags`, callback_data: `config:hashtags:${repo.id}` },
             ],
             [
-                { text: `${pushIcon} Watch Pushes`, callback_data: `config:watchPushes:${repo.id}` },
+                { text: `${prIcon} PRs`, callback_data: `config:watchPRs:${repo.id}` },
+                { text: `${pushIcon} Push`, callback_data: `config:watchPushes:${repo.id}` },
+            ],
+            [
+                { text: `${imgIcon} Img`, callback_data: `config:threadImage:${repo.id}` },
+                { text: `🎲 ${Math.round(config.singleTweetImageProbability * 100)}%`, callback_data: `config:singleImage:${repo.id}` },
             ],
             [{ text: '◀️ Back', callback_data: `repo:${repo.id}` }],
         ],

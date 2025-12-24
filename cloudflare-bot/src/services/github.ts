@@ -274,3 +274,127 @@ export async function validateRepo(
         return false;
     }
 }
+
+/**
+ * Fetch commit diff (patch) from GitHub
+ * Returns the diff limited to maxChars
+ */
+export async function fetchCommitDiff(
+    env: Env,
+    repo: string,
+    sha: string,
+    maxChars: number = 4000
+): Promise<string> {
+    try {
+        const response = await fetch(`${GITHUB_API}/repos/${repo}/commits/${sha}`, {
+            headers: {
+                Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+                Accept: 'application/vnd.github.v3.diff',
+                'User-Agent': 'content-bot',
+            },
+        });
+
+        if (!response.ok) {
+            console.error('Failed to fetch diff:', response.status);
+            return '';
+        }
+
+        const diff = await response.text();
+        return diff.substring(0, maxChars);
+    } catch (error) {
+        console.error('Error fetching diff:', error);
+        return '';
+    }
+}
+
+/**
+ * Fetch list of changed files for a commit
+ */
+export async function fetchFileList(
+    env: Env,
+    repo: string,
+    sha: string
+): Promise<string[]> {
+    try {
+        const commit = await getCommit(env, repo, sha);
+        return commit.files?.map(f => f.filename) || [];
+    } catch (error) {
+        console.error('Error fetching file list:', error);
+        return [];
+    }
+}
+
+/**
+ * Fetch file content from GitHub (for with_content level)
+ * Returns truncated content
+ */
+async function fetchFileContent(
+    env: Env,
+    repo: string,
+    path: string,
+    sha: string,
+    maxChars: number = 8000
+): Promise<string> {
+    try {
+        const response = await fetch(`${GITHUB_API}/repos/${repo}/contents/${path}?ref=${sha}`, {
+            headers: {
+                Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+                Accept: 'application/vnd.github.v3.raw',
+                'User-Agent': 'content-bot',
+            },
+        });
+
+        if (!response.ok) {
+            return `[Could not fetch ${path}]`;
+        }
+
+        const content = await response.text();
+        return content.substring(0, maxChars);
+    } catch (error) {
+        return `[Error fetching ${path}]`;
+    }
+}
+
+export interface EnhancedCodeContext {
+    diff?: string;
+    files?: string[];
+    fileContents?: Record<string, string>;
+}
+
+/**
+ * Get enhanced code context based on config level
+ */
+export async function getEnhancedCodeContext(
+    env: Env,
+    repo: string,
+    sha: string,
+    level: 'metadata' | 'with_diff' | 'with_files' | 'with_content'
+): Promise<EnhancedCodeContext> {
+    const result: EnhancedCodeContext = {};
+
+    if (level === 'metadata') {
+        return result;
+    }
+
+    // with_diff and above: include diff
+    if (['with_diff', 'with_files', 'with_content'].includes(level)) {
+        result.diff = await fetchCommitDiff(env, repo, sha);
+    }
+
+    // with_files and above: include file list
+    if (['with_files', 'with_content'].includes(level)) {
+        result.files = await fetchFileList(env, repo, sha);
+    }
+
+    // with_content: include actual file contents (WARNING: expensive)
+    if (level === 'with_content' && result.files) {
+        result.fileContents = {};
+        // Limit to first 5 files to avoid excessive API calls
+        const filesToFetch = result.files.slice(0, 5);
+        for (const file of filesToFetch) {
+            result.fileContents[file] = await fetchFileContent(env, repo, file, sha);
+        }
+    }
+
+    return result;
+}

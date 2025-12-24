@@ -103,3 +103,55 @@ export async function deleteMessage(
         }),
     });
 }
+
+/**
+ * Send a photo with optional caption
+ */
+export async function sendPhoto(
+    env: Env,
+    chatId: string | number,
+    photoUrl: string,
+    caption?: string,
+    keyboard?: InlineButton[][]
+): Promise<number> {
+    const response = await fetch(`${TELEGRAM_API}${env.TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            chat_id: chatId,
+            photo: photoUrl,
+            caption,
+            parse_mode: 'HTML',
+            reply_markup: keyboard ? { inline_keyboard: keyboard } : undefined,
+        }),
+    });
+
+    const data = await response.json() as { ok: boolean; result?: { message_id: number }; description?: string };
+
+    if (!data.ok || !data.result) {
+        console.error('sendPhoto failed:', data.description);
+        throw new Error(`Failed to send photo: ${data.description}`);
+    }
+
+    console.log('Sent photo:', data.result.message_id);
+    return data.result.message_id;
+}
+
+/**
+ * Send a message with optional image
+ * If imageUrl is provided, sends photo with caption; otherwise sends text message
+ */
+export async function sendMessageWithImage(
+    env: Env,
+    chatId: string | number,
+    text: string,
+    imageUrl?: string | null,
+    keyboard?: InlineButton[][]
+): Promise<number> {
+    if (imageUrl) {
+        // Truncate text to 1024 chars for photo captions (Telegram limit)
+        const caption = text.length > 1024 ? text.substring(0, 1021) + '...' : text;
+        return sendPhoto(env, chatId, imageUrl, caption, keyboard);
+    }
+    return sendMessage(env, chatId, text, keyboard);
+}

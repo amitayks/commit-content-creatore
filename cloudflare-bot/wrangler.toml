@@ -8,6 +8,11 @@ binding = "DB"
 database_name = "content-bot-db"
 database_id = "4bd535da-8924-4bf2-bb50-19d25f483236"
 
+# R2 Storage binding
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "content-bot-images"
+
 # Cron triggers for scheduled publishing
 [triggers]
 crons = ["0 * * * *"]  # Every hour

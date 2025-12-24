@@ -42,6 +42,22 @@ export default {
             return migrateDatabase(env);
         }
 
+        // Serve images from R2
+        if (url.pathname.startsWith('/image/')) {
+            const key = url.pathname.replace('/image/', '');
+            const object = await env.IMAGES.get(key);
+
+            if (!object) {
+                return new Response('Image not found', { status: 404 });
+            }
+
+            const headers = new Headers();
+            headers.set('Content-Type', object.httpMetadata?.contentType || 'image/png');
+            headers.set('Cache-Control', 'public, max-age=31536000');
+
+            return new Response(object.body, { headers });
+        }
+
         return new Response('Not Found', { status: 404 });
     },
 

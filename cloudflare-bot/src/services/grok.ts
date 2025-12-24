@@ -31,10 +31,17 @@ Your posts should be:
 - Never use hashtags unless specifically relevant
 - Each tweet must be ≤ 280 characters
 
+ALSO generate an imagePrompt - a detailed description for an AI image generator to create a visually striking image that represents this code change. The image should:
+- Be futuristic, holographic, or modern tech aesthetic
+- Include visual elements related to the specific code/feature (not generic)
+- Be suitable for a developer Twitter audience
+- Never include text in the image itself
+
 Respond ONLY with valid JSON in this format:
 {
   "format": "single" or "thread",
-  "tweets": [{ "text": "...", "index": 0 }, ...]
+  "tweets": [{ "text": "...", "index": 0 }, ...],
+  "imagePrompt": "Create a sleek, dark-themed..."
 }`,
                 },
                 {
@@ -86,12 +93,86 @@ Respond ONLY with valid JSON in this format:
 }
 
 /**
+ * Edit/refine content based on user instructions
+ */
+export async function editContent(
+    env: Env,
+    currentContent: DraftContent,
+    instruction: string
+): Promise<DraftContent> {
+    const currentTweets = currentContent.tweets.map(t => t.text).join('\n---\n');
+
+    const response = await fetch(`${GROK_API}/chat/completions`, {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${env.GROK_API_KEY}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            model: 'grok-4-1-fast-reasoning',
+            messages: [
+                {
+                    role: 'system',
+                    content: `You are editing Twitter/X posts. The user has existing content and wants changes.
+Apply the user's instructions while:
+- Keeping the same format (single/thread)
+- Each tweet must be ≤ 280 characters
+- Maintaining professional quality
+
+Respond ONLY with valid JSON in this format:
+{
+  "format": "single" or "thread",
+  "tweets": [{ "text": "...", "index": 0 }, ...],
+  "imagePrompt": "Updated visual description..."
+}`,
+                },
+                {
+                    role: 'user',
+                    content: `Current content (${currentContent.format}):
+${currentTweets}
+
+Instruction: ${instruction}
+
+Apply this change and return the updated content as JSON.`,
+                },
+            ],
+            temperature: 0.7,
+        }),
+    });
+
+    if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Grok API error: ${error}`);
+    }
+
+    const data = await response.json() as { choices: [{ message: { content: string } }] };
+    const content = data.choices[0]?.message?.content || '';
+
+    // Extract JSON from response
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+        throw new Error('Failed to parse Grok response');
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]) as DraftContent;
+
+    // Enforce tweet limits
+    parsed.tweets = parsed.tweets.map((t, i) => ({
+        text: t.text.substring(0, 280),
+        index: i,
+    }));
+
+    return parsed;
+}
+
+/**
  * Generate an image for the post
  */
 export async function generateImage(env: Env, content: DraftContent): Promise<string | null> {
     try {
-        const prompt = buildImagePrompt(content);
-        console.log('Generating image with prompt:', prompt);
+        // Use Grok-generated imagePrompt if available, otherwise build from content
+        const prompt = content.imagePrompt || buildImagePrompt(content);
+        console.log('Generating image with prompt:', prompt.substring(0, 200));
 
         const response = await fetch(`${GROK_API}/images/generations`, {
             method: 'POST',
@@ -125,6 +206,47 @@ export async function generateImage(env: Env, content: DraftContent): Promise<st
         return imageUrl || null;
     } catch (error) {
         console.error('Image generation error:', error);
+        return null;
+    }
+}
+
+/**
+ * Generate an image and store it in R2
+ * @returns R2 key path for the stored image, or null if failed
+ */
+export async function generateAndStoreImage(
+    env: Env,
+    content: DraftContent,
+    draftId: string
+): Promise<string | null> {
+    try {
+        // Generate the image
+        const imageUrl = await generateImage(env, content);
+        if (!imageUrl) {
+            console.log('No image URL returned from generation');
+            return null;
+        }
+
+        // Download the image
+        const response = await fetch(imageUrl);
+        if (!response.ok) {
+            console.error('Failed to download generated image:', response.status);
+            return null;
+        }
+
+        const imageData = await response.arrayBuffer();
+        const contentType = response.headers.get('content-type') || 'image/png';
+
+        // Store in R2
+        const key = `drafts/${draftId}/image.png`;
+        await env.IMAGES.put(key, imageData, {
+            httpMetadata: { contentType },
+        });
+
+        console.log('Image stored in R2:', key);
+        return key;
+    } catch (error) {
+        console.error('generateAndStoreImage error:', error);
         return null;
     }
 }

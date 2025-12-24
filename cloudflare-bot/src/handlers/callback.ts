@@ -199,10 +199,28 @@ async function handleAction(
             try {
                 const content = JSON.parse(draft.content) as DraftContent;
 
-                // Generate image
-                console.log('Starting image generation for publish...');
-                const imageUrl = await generateImage(env, content);
-                console.log('Image generation result:', imageUrl);
+                let imageUrl: string | null = null;
+
+                // Check if draft already has an image stored in R2
+                if (draft.image_url && draft.image_url.startsWith('drafts/')) {
+                    // It's an R2 key, fetch the image
+                    const r2Object = await env.IMAGES.get(draft.image_url);
+                    if (r2Object) {
+                        // For X upload, we need a URL - convert R2 to data URL or use worker URL
+                        // Generate fresh for now since X needs accessible URL
+                        console.log('R2 image exists, generating fresh for X...');
+                        imageUrl = await generateImage(env, content);
+                    }
+                } else if (draft.image_url) {
+                    // Already a URL
+                    imageUrl = draft.image_url;
+                } else {
+                    // Generate new image
+                    console.log('Starting image generation for publish...');
+                    imageUrl = await generateImage(env, content);
+                }
+
+                console.log('Image URL for publish:', imageUrl);
 
                 let mediaId: string | undefined;
                 if (imageUrl) {
@@ -310,16 +328,28 @@ Format: <code>2024-01-15 14:00</code>`,
         }
 
         case 'edit': {
-            // For now, suggest regenerate
+            // Set awaiting input for edit instructions
+            await updateChatState(env, chatId, {
+                context: {
+                    awaiting_input: 'edit_draft',
+                    selected_draft_id: draftId
+                },
+            });
+
             return {
                 text: `✏️ <b>Edit Draft</b>
 
-Direct editing is not yet supported. 
+What changes would you like to make?
 
-Use 🔄 <b>Regenerate</b> to create fresh content with the same PR data.`,
+<i>Examples:</i>
+• "Make it more casual"
+• "Add more technical details"
+• "Focus on the performance improvements"
+• "Make it shorter"
+
+Type your instructions below:`,
                 keyboard: [
-                    [{ text: '🔄 Regenerate', callback_data: `action:regenerate:${draftId}` }],
-                    [{ text: '◀️ Back', callback_data: `draft:${draftId}` }],
+                    [{ text: '❌ Cancel', callback_data: `draft:${draftId}` }],
                 ],
             };
         }
@@ -422,6 +452,32 @@ async function handleConfigToggle(
         }
         case 'watchPushes': {
             config.watchPushes = !config.watchPushes;
+            break;
+        }
+        case 'codeContext': {
+            // Cycle through context levels
+            const levels = ['metadata', 'with_diff', 'with_files', 'with_content'] as const;
+            const currentIndex = levels.indexOf(config.codeContext as typeof levels[number]);
+            const nextIndex = (currentIndex + 1) % levels.length;
+            config.codeContext = levels[nextIndex];
+            break;
+        }
+        case 'language': {
+            // Toggle between en and he
+            config.language = config.language === 'en' ? 'he' : 'en';
+            break;
+        }
+        case 'threadImage': {
+            config.alwaysGenerateThreadImage = !config.alwaysGenerateThreadImage;
+            break;
+        }
+        case 'singleImage': {
+            // Cycle through probabilities: 0 -> 0.3 -> 0.5 -> 0.7 -> 1.0 -> 0
+            const probs = [0, 0.3, 0.5, 0.7, 1.0];
+            const currentProb = config.singleTweetImageProbability;
+            const currentIndex = probs.findIndex(p => Math.abs(p - currentProb) < 0.05);
+            const nextIndex = (currentIndex + 1) % probs.length;
+            config.singleTweetImageProbability = probs[nextIndex];
             break;
         }
         default:

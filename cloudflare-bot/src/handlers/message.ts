@@ -4,11 +4,11 @@
  * Key pattern: Text messages ALWAYS get a NEW message response
  */
 
-import type { Env, TelegramMessage, ChatContext } from '../types';
-import { sendMessage } from '../services/telegram';
-import { getChatState, updateChatState, parseContext, createDraft, getAllDrafts, updateDraftStatus, createRepo, getRepoByOwnerRepo, updateRepo } from '../services/db';
+import type { Env, TelegramMessage, ChatContext, DraftContent, InlineButton } from '../types';
+import { sendMessage, editMessage } from '../services/telegram';
+import { getChatState, updateChatState, parseContext, createDraft, getAllDrafts, updateDraftStatus, createRepo, getRepoByOwnerRepo, updateRepo, getDraft, updateDraftContent } from '../services/db';
 import { getContentSource, validateRepo } from '../services/github';
-import { generateContent, generateImage } from '../services/grok';
+import { generateContent, generateImage, editContent } from '../services/grok';
 import { postThread, uploadMedia } from '../services/x';
 import { createWebhook } from '../services/webhook';
 import {
@@ -92,6 +92,9 @@ async function handleAwaitingInput(
             break;
         case 'add_repo':
             await handleAddRepoInput(env, chatId, text);
+            break;
+        case 'edit_draft':
+            await handleEditDraftInput(env, chatId, text, context);
             break;
         default:
             // Unknown state, reset to home
@@ -502,3 +505,60 @@ async function handlePublishApproved(env: Env, chatId: string): Promise<void> {
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
+
+/**
+ * Handle edit draft input - refine content based on user instructions
+ */
+async function handleEditDraftInput(
+    env: Env,
+    chatId: string,
+    instruction: string,
+    context: ChatContext
+): Promise<void> {
+    // Clear awaiting state
+    await updateChatState(env, chatId, { context: null });
+
+    const draftId = context.selected_draft_id;
+    if (!draftId) {
+        const view = renderError('No draft selected for editing.');
+        await sendMessage(env, chatId, view.text, view.keyboard);
+        return;
+    }
+
+    try {
+        // Get the draft
+        const draft = await getDraft(env, draftId);
+        if (!draft) {
+            const view = renderError('Draft not found.');
+            await sendMessage(env, chatId, view.text, view.keyboard);
+            return;
+        }
+
+        // Parse current content
+        const currentContent = JSON.parse(draft.content) as DraftContent;
+
+        // Send "editing..." message
+        const editingView = {
+            text: `✏️ <b>Editing draft...</b>\n\nApplying: "<i>${instruction}</i>"`,
+            keyboard: [] as InlineButton[][],
+        };
+        const messageId = await sendMessage(env, chatId, editingView.text);
+
+        // Call editContent to refine via Grok
+        const refinedContent = await editContent(env, currentContent, instruction);
+
+        // Update the draft with new content
+        await updateDraftContent(env, draftId, JSON.stringify(refinedContent));
+
+        // Edit the message with success
+        await editMessage(env, chatId, messageId,
+            `✅ <b>Draft updated!</b>\n\nApplied: "<i>${instruction}</i>"`,
+            [[{ text: '👀 View Draft', callback_data: `draft:${draftId}` }]]
+        );
+    } catch (error) {
+        console.error('Edit draft error:', error);
+        const view = renderError(`Failed to edit draft: ${String(error)}`);
+        await sendMessage(env, chatId, view.text, view.keyboard);
+    }
+}
+
