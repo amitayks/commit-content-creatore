@@ -10,14 +10,19 @@ Transform your code commits and PRs into engaging developer content automaticall
 - **🤖 AI Content Generation** - Grok AI creates natural, engaging threads
 - **💬 Telegram Bot** - Review, edit, approve, or reject drafts
 - **🐦 X Publishing** - Automatic thread posting with rate limit handling
-- **⚙️ Per-Project Config** - Different tones and styles per repository
-- **📦 Draft Workflow** - Nothing publishes without your approval
+- **📦 Repo Watching** - Auto-detect new PRs/pushes via GitHub webhooks
+- **⚙️ Per-Repo Config** - Different tones and styles per repository
+- **📋 Draft Workflow** - Nothing publishes without your approval
 
 ## 🏗️ Architecture
 
+### Cloudflare Worker (Primary)
+
 ```
+Add Repo → Create GitHub Webhook → Watch for Events
+                                        ↓
 GitHub Push/PR → Webhook → AI Generation → Draft Created
-                                              ↓
+                                               ↓
 Telegram Notification ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
         ↓
    [Approve] → Publish to X
@@ -26,160 +31,119 @@ Telegram Notification ← ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
    [Regen]   → New AI generation
 ```
 
-## 🚀 Quick Start
+**Stack:** Cloudflare Workers + D1 Database + Telegram Bot API
 
-### 1. Clone and Install
+## 🚀 Quick Start (Cloudflare Bot)
+
+### 1. Deploy to Cloudflare
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/commit-content-tracker.git
-cd commit-content-tracker
+cd cloudflare-bot
 npm install
+npx wrangler d1 create content-bot-db
+# Update wrangler.toml with your database ID
+npx wrangler deploy
 ```
 
-### 2. Configure Environment
-
-Copy `.env.example` to `.env` and fill in your API keys:
+### 2. Configure Secrets
 
 ```bash
-cp .env.example .env
+npx wrangler secret put TELEGRAM_BOT_TOKEN
+npx wrangler secret put TELEGRAM_CHAT_ID
+npx wrangler secret put GITHUB_TOKEN          # needs admin:repo_hook scope
+npx wrangler secret put GITHUB_WEBHOOK_SECRET # openssl rand -hex 32
+npx wrangler secret put GROK_API_KEY
+npx wrangler secret put X_API_KEY
+npx wrangler secret put X_API_SECRET
+npx wrangler secret put X_ACCESS_TOKEN
+npx wrangler secret put X_ACCESS_SECRET
 ```
 
-**Required API Keys:**
-- **Grok API** - Get from [xAI Console](https://console.x.ai/)
-- **GitHub Token** - Personal access token with `repo` scope
-- **X API** - Developer account at [developer.x.com](https://developer.x.com/)
-- **Telegram Bot** - Create via [@BotFather](https://t.me/botfather)
+### 3. Set Up Telegram Webhook
 
-### 3. Create Project Config
+Visit: `https://your-worker.workers.dev/setup`
 
-Create `config/projects/your-project.yaml`:
+### 4. Run Database Migration
 
-```yaml
-project:
-  id: my-project
-  name: My Project
-  repository: username/repo-name
-
-triggers:
-  branches:
-    - main
-  events:
-    - pr_merged
-    - push
-
-content:
-  types:
-    - technical
-    - feature
-  tone: professional-casual
-
-formatting:
-  hashtags:
-    always:
-      - "#DevLife"
-    project:
-      - "#MyProject"
-  emojis: true
-```
-
-### 4. Set Up GitHub Secrets
-
-Add these secrets to your repository:
-
-| Secret | Description |
-|--------|-------------|
-| `GROK_API_KEY` | xAI Grok API key |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
-| `X_API_KEY` | X API consumer key |
-| `X_API_SECRET` | X API consumer secret |
-| `X_ACCESS_TOKEN` | X access token |
-| `X_ACCESS_SECRET` | X access token secret |
-
-### 5. Enable GitHub Actions
-
-The workflows will automatically:
-- Generate content on push/PR merge
-- Publish approved drafts every 4 hours
-- Handle Telegram bot interactions
+Visit: `https://your-worker.workers.dev/migrate`
 
 ## 📱 Telegram Bot Commands
 
 | Command | Description |
 |---------|-------------|
-| `/pending` | List drafts waiting for review |
-| `/approved` | List approved drafts in queue |
-| `/stats` | Show content statistics |
-| `/publish` | Publish next approved draft |
+| `/start` | Open the dashboard |
+| `/repos` | View watched repositories |
+| `/watch owner/repo` | Add a repo to watch |
+| `/generate SHA` | Generate content from a commit |
+| `/drafts` | View pending drafts |
+| `/publish` | Publish all approved drafts |
 | `/help` | Show available commands |
 
-**Editing a draft:** Reply to a draft preview with `1: New text here` to edit tweet #1.
+## 📦 Repo Watching
+
+The bot can automatically watch GitHub repositories for new PRs and pushes:
+
+1. **Add a repo**: `/watch username/repository`
+2. **Webhook is created automatically** on GitHub
+3. **When PRs are merged**: Content is auto-generated and sent for approval
+4. **Configure per-repo settings**:
+   - Tone (professional/casual/technical)
+   - Include hashtags
+   - Watch PRs / Watch pushes
+   - Target branches
 
 ## 📁 Project Structure
 
 ```
-commit-content-tracker/
-├── .github/workflows/       # GitHub Actions
-│   ├── generate-content.yml # Content generation on push/PR
-│   ├── publish-drafts.yml   # Scheduled publishing
-│   └── telegram-handler.yml # Bot update handling
+cloudflare-bot/           # Cloudflare Worker implementation
 ├── src/
-│   ├── services/            # Core services
-│   │   ├── github.service.ts
-│   │   ├── grok.service.ts
-│   │   ├── telegram.service.ts
-│   │   ├── x.service.ts
-│   │   ├── storage.service.ts
-│   │   └── config.service.ts
-│   ├── workflows/           # Entry points
-│   │   ├── generate-content.ts
-│   │   ├── telegram-handler.ts
-│   │   └── publish-drafts.ts
-│   ├── types/               # TypeScript types
-│   └── utils/               # Logger, retry
-├── config/
-│   └── projects/            # Project configs
-├── data/
-│   ├── drafts/              # Pending drafts
-│   └── published/           # Archived content
+│   ├── index.ts          # Main entry point
+│   ├── types.ts          # TypeScript types
+│   ├── handlers/         # Request handlers
+│   │   ├── message.ts    # Text message handling
+│   │   ├── callback.ts   # Button click handling
+│   │   ├── github-webhook.ts # GitHub webhook processing
+│   │   └── cron.ts       # Scheduled tasks
+│   ├── services/         # Core services
+│   │   ├── db.ts         # D1 database operations
+│   │   ├── telegram.ts   # Telegram API
+│   │   ├── github.ts     # GitHub API
+│   │   ├── grok.ts       # AI content generation
+│   │   ├── x.ts          # Twitter/X publishing
+│   │   └── webhook.ts    # Webhook management
+│   └── views/            # UI renderers
+│       └── index.ts      # All Telegram views
+├── schema.sql            # D1 database schema
+├── wrangler.toml         # Cloudflare config
 └── package.json
 ```
 
-## ⚙️ Configuration Options
+## ⚙️ Per-Repo Configuration
 
-### Content Types
-- `technical` - Deep dives into code patterns
-- `feature` - What the change accomplishes
-- `learning` - Tech discoveries and tools
-- `mixed` - AI decides based on context
+Each watched repository can have its own settings:
 
-### Tone Settings
-- `formal` - Professional, business-like
-- `casual` - Friendly, conversational
-- `technical` - Code-focused, detailed
-- `enthusiastic` - Excited, energetic
-- `professional-casual` - Balanced (recommended)
-
-### Thread Settings
-- `minCommitsForThread: 3` - When to create threads vs single tweets
-- `maxTweets: 10` - Maximum thread length
-- `alwaysGenerateImage: true` - AI images for threads
-- `singleTweetImageProbability: 0.7` - Image chance for singles
+| Setting | Options | Default |
+|---------|---------|---------|
+| Tone | professional, casual, technical | professional |
+| Hashtags | true/false | true |
+| Watch PRs | true/false | true |
+| Watch Pushes | true/false | false |
+| Branches | array of branch names | ["main"] |
+| Platform | x | x |
 
 ## 🔧 Development
 
 ```bash
+cd cloudflare-bot
+
 # Type check
-npm run typecheck
+npx tsc --noEmit
 
-# Lint (Biome)
-npm run lint
+# Local development
+npx wrangler dev
 
-# Fix lint issues
-npm run lint:fix
-
-# Run locally (polling mode for Telegram)
-npm run telegram
+# Deploy
+npx wrangler deploy
 ```
 
 ## 📝 License
@@ -188,4 +152,4 @@ MIT
 
 ---
 
-Built with TypeScript, Grok AI, and ❤️
+Built with TypeScript, Cloudflare Workers, Grok AI, and ❤️

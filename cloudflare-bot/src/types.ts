@@ -1,0 +1,231 @@
+/**
+ * Shared types for the Cloudflare Bot
+ */
+
+// Environment bindings
+export interface Env {
+    DB: D1Database;
+    TELEGRAM_BOT_TOKEN: string;
+    TELEGRAM_CHAT_ID: string;
+    GITHUB_TOKEN: string;
+    GITHUB_OWNER: string;
+    GITHUB_WEBHOOK_SECRET: string;
+    GROK_API_KEY: string;
+    X_API_KEY: string;
+    X_API_SECRET: string;
+    X_ACCESS_TOKEN: string;
+    X_ACCESS_SECRET: string;
+}
+
+// Draft status
+export type DraftStatus = 'draft' | 'approved' | 'published' | 'rejected' | 'scheduled';
+
+// Draft format
+export type DraftFormat = 'single' | 'thread';
+
+// Tweet in a draft
+export interface Tweet {
+    text: string;
+    index: number;
+}
+
+// Draft content structure
+export interface DraftContent {
+    format: DraftFormat;
+    tweets: Tweet[];
+}
+
+// Draft record from D1
+export interface Draft {
+    id: string;
+    pr_number: number;
+    pr_title: string;
+    commit_sha: string;
+    status: DraftStatus;
+    content: string; // JSON string of DraftContent
+    image_url: string | null;
+    scheduled_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+// Chat state for conversation tracking
+export interface ChatState {
+    chat_id: string;
+    message_id: number | null;
+    current_view: string;
+    context: string | null; // JSON for pagination, selected draft, etc.
+    updated_at: string;
+}
+
+// Published post record
+export interface Published {
+    id: string;
+    draft_id: string;
+    pr_number: number;
+    tweet_ids: string; // JSON array
+    tweet_url: string | null;
+    image_url: string | null;
+    published_at: string;
+}
+
+// ==================== REPO WATCHING ====================
+
+// Repo configuration for content generation
+export interface RepoConfig {
+    tone: 'professional' | 'casual' | 'technical';
+    includeHashtags: boolean;
+    watchPRs: boolean;
+    watchPushes: boolean;
+    branches: string[];
+    platform: 'x';
+}
+
+// Watched repo record from D1
+export interface WatchedRepo {
+    id: string;
+    owner: string;
+    repo: string;
+    is_watching: number; // 0 or 1
+    config: string; // JSON string of RepoConfig
+    webhook_id: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+// Default config for new repos
+export const DEFAULT_REPO_CONFIG: RepoConfig = {
+    tone: 'professional',
+    includeHashtags: true,
+    watchPRs: true,
+    watchPushes: false,
+    branches: ['main'],
+    platform: 'x',
+};
+
+// ==================== GITHUB WEBHOOKS ====================
+
+// GitHub webhook pull request event
+export interface GitHubPullRequestEvent {
+    action: string;
+    pull_request: {
+        number: number;
+        title: string;
+        body: string | null;
+        merged: boolean;
+        merged_at: string | null;
+        base: { ref: string };
+        head: { sha: string };
+        user: { login: string };
+        additions: number;
+        deletions: number;
+        changed_files: number;
+    };
+    repository: {
+        full_name: string;
+        owner: { login: string };
+        name: string;
+    };
+}
+
+// GitHub webhook push event
+export interface GitHubPushEvent {
+    ref: string;
+    commits: Array<{
+        id: string;
+        message: string;
+        author: { name: string; username?: string };
+        added: string[];
+        modified: string[];
+        removed: string[];
+    }>;
+    head_commit: {
+        id: string;
+        message: string;
+        author: { name: string; username?: string };
+    } | null;
+    repository: {
+        full_name: string;
+        owner: { login: string };
+        name: string;
+    };
+    pusher: { name: string };
+}
+
+// ==================== PR & COMMIT DATA ====================
+
+// PR data from GitHub
+export interface PRData {
+    number: number;
+    title: string;
+    body: string;
+    commits: string[];
+    files_changed: number;
+    additions: number;
+    deletions: number;
+    merged_at: string;
+    author: string;
+}
+
+// Direct commit data (fallback when no PR)
+export interface CommitData {
+    sha: string;
+    title: string;
+    body: string;
+    files_changed: number;
+    additions: number;
+    deletions: number;
+    author: string;
+    date: string;
+}
+
+// Union type for content generation source
+export type ContentSource =
+    | { type: 'pr'; data: PRData }
+    | { type: 'commit'; data: CommitData };
+
+// ==================== TELEGRAM ====================
+
+// Telegram inline button
+export interface InlineButton {
+    text: string;
+    callback_data: string;
+}
+
+// View render result
+export interface ViewResult {
+    text: string;
+    keyboard: InlineButton[][];
+}
+
+// Telegram message
+export interface TelegramMessage {
+    message_id: number;
+    chat: { id: number };
+    text?: string;
+    from?: { id: number; first_name: string };
+}
+
+// Telegram callback query
+export interface TelegramCallbackQuery {
+    id: string;
+    from: { id: number; first_name: string };
+    message?: TelegramMessage;
+    data?: string;
+}
+
+// Telegram update
+export interface TelegramUpdate {
+    update_id: number;
+    message?: TelegramMessage;
+    callback_query?: TelegramCallbackQuery;
+}
+
+// Context for stateful operations
+export interface ChatContext {
+    awaiting_input?: 'commit_sha' | 'schedule' | 'delete' | 'add_repo';
+    page?: number;
+    selected_draft_id?: string;
+    selected_repo_id?: string;
+}
+
