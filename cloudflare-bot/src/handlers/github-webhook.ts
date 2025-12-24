@@ -3,10 +3,10 @@
  */
 
 import type { Env, GitHubPullRequestEvent, GitHubPushEvent, DraftContent, ContentSource } from '../types';
-import { getWatchingRepos, getRepoByOwnerRepo, createDraft, parseRepoConfig } from '../services/db';
+import { getWatchingRepos, getRepoByOwnerRepo, createDraft, parseRepoConfig, updateDraft } from '../services/db';
 import { verifyWebhookSignature } from '../services/webhook';
-import { generateContent, generateImage } from '../services/grok';
-import { sendMessage } from '../services/telegram';
+import { generateContent, generateAndStoreImage } from '../services/grok';
+import { sendMessage, sendPhoto } from '../services/telegram';
 
 interface WebhookResult {
     processed: boolean;
@@ -205,6 +205,20 @@ async function handlePushEvent(
             content: JSON.stringify(draftContent),
         });
 
+        // Generate and store image if configured
+        let imageKey: string | null = null;
+        const shouldGenImage = draftContent.format === 'thread'
+            ? config.alwaysGenerateThreadImage
+            : Math.random() < config.singleTweetImageProbability;
+
+        if (shouldGenImage) {
+            console.log('Generating image for webhook draft...');
+            imageKey = await generateAndStoreImage(env, draftContent, draftId);
+            if (imageKey) {
+                await updateDraft(env, draftId, { image_url: imageKey });
+            }
+        }
+
         // Send notification
         await sendNotification(
             env,
@@ -213,7 +227,8 @@ async function handlePushEvent(
             commit.message.split('\n')[0],
             repoFullName,
             draftId,
-            draftContent
+            draftContent,
+            imageKey
         );
 
         return { processed: true, message: `Created draft for push ${commit.id.slice(0, 7)}` };
@@ -233,7 +248,8 @@ async function sendNotification(
     title: string,
     repo: string,
     draftId: string,
-    content: DraftContent
+    content: DraftContent,
+    imageKey?: string | null
 ): Promise<void> {
     const emoji = eventType === 'pr' ? '🔀' : '📤';
     const eventLabel = eventType === 'pr' ? `PR #${number} Merged` : `${number} commit${number > 1 ? 's' : ''} pushed`;
@@ -263,5 +279,15 @@ I've auto-generated content for this. Review and approve?`;
         ],
     ];
 
-    await sendMessage(env, env.TELEGRAM_CHAT_ID, text, keyboard);
+    // If we have an image stored in R2, we need to construct a full URL
+    // For now, use text-only notification since R2 images need worker URL
+    if (imageKey) {
+        // Note: To send R2 images via Telegram, we'd need full URL access
+        // For now, just note in the message that image was generated
+        const textWithImage = text + '\n\n🖼️ <i>Image generated and attached to draft</i>';
+        await sendMessage(env, env.TELEGRAM_CHAT_ID, textWithImage, keyboard);
+    } else {
+        await sendMessage(env, env.TELEGRAM_CHAT_ID, text, keyboard);
+    }
 }
+

@@ -118,6 +118,38 @@ export async function updateDraftContent(
 }
 
 /**
+ * Update draft fields (general)
+ */
+export async function updateDraft(
+    env: Env,
+    id: string,
+    updates: { content?: string; image_url?: string | null }
+): Promise<void> {
+    const sets: string[] = [];
+    const values: (string | null)[] = [];
+
+    if (updates.content !== undefined) {
+        sets.push('content = ?');
+        values.push(updates.content);
+    }
+    if (updates.image_url !== undefined) {
+        sets.push('image_url = ?');
+        values.push(updates.image_url);
+    }
+
+    if (sets.length === 0) return;
+
+    sets.push("updated_at = datetime('now')");
+    values.push(id);
+
+    await env.DB.prepare(
+        `UPDATE drafts SET ${sets.join(', ')} WHERE id = ?`
+    )
+        .bind(...values)
+        .run();
+}
+
+/**
  * Schedule a draft
  */
 export async function scheduleDraft(
