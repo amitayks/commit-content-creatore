@@ -171,9 +171,16 @@ export async function uploadMedia(env: Env, imageUrl: string): Promise<string> {
     }
 
     const imageBuffer = await imageResponse.arrayBuffer();
-    const base64Data = btoa(
-        String.fromCharCode(...new Uint8Array(imageBuffer))
-    );
+
+    // Convert to base64 without stack overflow (chunked approach)
+    const bytes = new Uint8Array(imageBuffer);
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        binary += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    const base64Data = btoa(binary);
 
     const url = `${X_UPLOAD_API}/media/upload.json`;
     const authHeader = await generateOAuthHeader(env, 'POST', url, { media_data: base64Data });
