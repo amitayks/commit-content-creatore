@@ -205,21 +205,7 @@ async function handlePushEvent(
             content: JSON.stringify(draftContent),
         });
 
-        // Generate and store image if configured
-        let imageKey: string | null = null;
-        const shouldGenImage = draftContent.format === 'thread'
-            ? config.alwaysGenerateThreadImage
-            : Math.random() < config.singleTweetImageProbability;
-
-        if (shouldGenImage) {
-            console.log('Generating image for webhook draft...');
-            imageKey = await generateAndStoreImage(env, draftContent, draftId);
-            if (imageKey) {
-                await updateDraft(env, draftId, { image_url: imageKey });
-            }
-        }
-
-        // Send notification
+        // Send notification FIRST to avoid timeout
         await sendNotification(
             env,
             'push',
@@ -228,8 +214,26 @@ async function handlePushEvent(
             repoFullName,
             draftId,
             draftContent,
-            imageKey
+            null // No image yet
         );
+
+        // Try to generate image after notification (may timeout but notification is sent)
+        const shouldGenImage = draftContent.format === 'thread'
+            ? config.alwaysGenerateThreadImage
+            : Math.random() < config.singleTweetImageProbability;
+
+        if (shouldGenImage) {
+            try {
+                console.log('Generating image for webhook draft...');
+                const imageKey = await generateAndStoreImage(env, draftContent, draftId);
+                if (imageKey) {
+                    await updateDraft(env, draftId, { image_url: imageKey });
+                    console.log('Image generated and stored:', imageKey);
+                }
+            } catch (imgError) {
+                console.error('Image generation failed (non-fatal):', imgError);
+            }
+        }
 
         return { processed: true, message: `Created draft for push ${commit.id.slice(0, 7)}` };
     } catch (error) {
