@@ -141,7 +141,7 @@ This draft may have been deleted.`,
         case 'draft':
             actionButtons = [
                 [
-                    { text: '🚀 Publish', callback_data: `action:approve:${draft.id}` },
+                    { text: '✅ Approve', callback_data: `action:approve:${draft.id}` },
                     { text: '✏️ Edit', callback_data: `action:edit:${draft.id}` },
                     { text: '❌ Reject', callback_data: `action:reject:${draft.id}` },
                 ],

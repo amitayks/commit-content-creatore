@@ -274,7 +274,7 @@ I've auto-generated content for this. Review and approve?`;
 
     const keyboard = [
         [
-            { text: '🚀 Publish', callback_data: `action:approve:${draftId}` },
+            { text: '✅ Approve', callback_data: `action:approve:${draftId}` },
             { text: '👀 View', callback_data: `draft:${draftId}` },
         ],
         [
