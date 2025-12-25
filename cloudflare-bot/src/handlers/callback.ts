@@ -76,11 +76,6 @@ export async function handleCallback(
                 let imageUrl: string | null = null;
                 try {
                     imageUrl = await ensureImage(env, draft);
-                    // Update draft with image key if newly generated
-                    if (imageUrl && !draft.image_url) {
-                        const imageKey = imageUrl.replace('/image/', '');
-                        await updateDraft(env, draft.id, { image_url: imageKey });
-                    }
                 } catch (imgError) {
                     console.error('Image generation failed:', imgError);
                 }
@@ -262,17 +257,21 @@ async function handleAction(
 
                 let imageUrl: string | null = null;
 
+                console.log('Publishing draft, image_url:', draft.image_url);
+
                 // Check if draft already has an image stored in R2
                 if (draft.image_url && draft.image_url.startsWith('drafts/')) {
                     // It's an R2 key - use worker URL to serve it
                     const r2Object = await env.IMAGES.get(draft.image_url);
+                    console.log('R2 object exists:', !!r2Object);
                     if (r2Object) {
                         imageUrl = `https://content-bot.keisarcontentcreator.workers.dev/image/${draft.image_url}`;
-                        console.log('Using R2 image via worker URL');
+                        console.log('Using R2 image via worker URL:', imageUrl);
                     }
                 } else if (draft.image_url) {
                     // Already a URL
                     imageUrl = draft.image_url;
+                    console.log('Using existing URL:', imageUrl);
                 }
 
                 // Generate image if none exists
@@ -281,7 +280,7 @@ async function handleAction(
                     imageUrl = await generateImage(env, content);
                 }
 
-                console.log('Image URL for publish:', imageUrl);
+                console.log('Final image URL for publish:', imageUrl);
 
                 let mediaId: string | undefined;
                 if (imageUrl) {

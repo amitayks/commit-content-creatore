@@ -265,6 +265,7 @@ export async function ensureImage(
         const existing = await env.IMAGES.get(draft.image_url);
         if (existing) {
             // Return worker URL to serve the image
+            console.log('Using existing R2 image:', draft.image_url);
             return `/image/${draft.image_url}`;
         }
         // Image key exists but file missing - regenerate
@@ -287,6 +288,12 @@ export async function ensureImage(
     if (!imageKey) {
         return null;
     }
+
+    // Save the image key to the database
+    // Import updateDraft dynamically to avoid circular dependency
+    const { updateDraft } = await import('./db');
+    await updateDraft(env, draft.id, { image_url: imageKey });
+    console.log('Saved image key to draft:', imageKey);
 
     // Return the worker URL to serve the image
     return `/image/${imageKey}`;
