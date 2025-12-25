@@ -5,9 +5,9 @@
  */
 
 import type { Env, TelegramCallbackQuery, DraftContent } from '../types';
-import { editMessage, answerCallback } from '../services/telegram';
-import { getChatState, updateChatState, parseContext, getDraft, updateDraftStatus, scheduleDraft, deleteDraft, getAllDrafts, createPublished, getRepo, updateRepo, deleteRepo } from '../services/db';
-import { generateContent, generateImage } from '../services/grok';
+import { editMessage, answerCallback, sendPhoto, deleteMessage, sendMessage } from '../services/telegram';
+import { getChatState, updateChatState, parseContext, getDraft, updateDraftStatus, scheduleDraft, deleteDraft, getAllDrafts, createPublished, getRepo, updateRepo, deleteRepo, updateDraft } from '../services/db';
+import { generateContent, generateImage, ensureImage } from '../services/grok';
 import { getContentSource } from '../services/github';
 import { postThread, uploadMedia } from '../services/x';
 import { deleteWebhook } from '../services/webhook';
@@ -64,13 +64,56 @@ export async function handleCallback(
                 view = await handleViewChange(env, chatId, value);
                 break;
 
-            case 'draft':
+            case 'draft': {
+                // Fetch draft and ensure it has an image
+                const draft = await getDraft(env, value);
+                if (!draft) {
+                    view = renderError('Draft not found.');
+                    break;
+                }
+
+                // Generate image on-demand if needed
+                let imageUrl: string | null = null;
+                try {
+                    imageUrl = await ensureImage(env, draft);
+                    // Update draft with image key if newly generated
+                    if (imageUrl && !draft.image_url) {
+                        const imageKey = imageUrl.replace('/image/', '');
+                        await updateDraft(env, draft.id, { image_url: imageKey });
+                    }
+                } catch (imgError) {
+                    console.error('Image generation failed:', imgError);
+                }
+
+                // Get the view with buttons
                 view = await renderDraftDetail(env, value);
+
+                // Update state
                 await updateChatState(env, chatId, {
                     current_view: 'draft',
                     context: { selected_draft_id: value },
                 });
+
+                // If we have an image, we need to send a new photo message instead of editing
+                // because Telegram can't convert text message to photo
+                if (imageUrl) {
+                    // Delete old message and send new one with photo
+                    try {
+                        await deleteMessage(env, chatId, messageId);
+                    } catch {
+                        // Ignore delete errors
+                    }
+                    // Build full URL for Telegram
+                    const fullImageUrl = `https://content-bot.keisarcontentcreator.workers.dev${imageUrl}`;
+                    // Truncate text as caption (1024 limit)
+                    const caption = view.text.length > 1000
+                        ? view.text.substring(0, 997) + '...'
+                        : view.text;
+                    await sendPhoto(env, chatId, fullImageUrl, caption, view.keyboard);
+                    return;
+                }
                 break;
+            }
 
             case 'action':
                 view = await handleAction(env, chatId, value, extra, messageId);
@@ -103,13 +146,31 @@ export async function handleCallback(
                 view = renderHome();
         }
 
-        // Edit the current message with new content
-        await editMessage(env, chatId, messageId, view.text, view.keyboard);
+        // Check if current message is a photo (Telegram includes 'photo' field)
+        // Photo messages can't be edited to text, so delete and send new
+        const isPhotoMessage = 'photo' in callback.message;
+
+        if (isPhotoMessage) {
+            // Delete photo message and send new text message
+            try {
+                await deleteMessage(env, chatId, messageId);
+            } catch {
+                // Ignore delete errors
+            }
+            await sendMessage(env, chatId, view.text, view.keyboard);
+        } else {
+            // Normal text message - can edit
+            await editMessage(env, chatId, messageId, view.text, view.keyboard);
+        }
         await answerCallback(env, callback.id);
     } catch (error) {
         console.error('Callback handler error:', error);
         const view = renderError(String(error));
-        await editMessage(env, chatId, messageId, view.text, view.keyboard);
+        try {
+            await editMessage(env, chatId, messageId, view.text, view.keyboard);
+        } catch {
+            await sendMessage(env, chatId, view.text, view.keyboard);
+        }
         await answerCallback(env, callback.id, 'Error occurred');
     }
 }
@@ -203,20 +264,20 @@ async function handleAction(
 
                 // Check if draft already has an image stored in R2
                 if (draft.image_url && draft.image_url.startsWith('drafts/')) {
-                    // It's an R2 key, fetch the image
+                    // It's an R2 key - use worker URL to serve it
                     const r2Object = await env.IMAGES.get(draft.image_url);
                     if (r2Object) {
-                        // For X upload, we need a URL - convert R2 to data URL or use worker URL
-                        // Generate fresh for now since X needs accessible URL
-                        console.log('R2 image exists, generating fresh for X...');
-                        imageUrl = await generateImage(env, content);
+                        imageUrl = `https://content-bot.keisarcontentcreator.workers.dev/image/${draft.image_url}`;
+                        console.log('Using R2 image via worker URL');
                     }
                 } else if (draft.image_url) {
                     // Already a URL
                     imageUrl = draft.image_url;
-                } else {
-                    // Generate new image
-                    console.log('Starting image generation for publish...');
+                }
+
+                // Generate image if none exists
+                if (!imageUrl) {
+                    console.log('No image available, generating...');
                     imageUrl = await generateImage(env, content);
                 }
 

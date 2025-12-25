@@ -252,6 +252,47 @@ export async function generateAndStoreImage(
 }
 
 /**
+ * Ensure a draft has an image - check R2 first, generate if missing
+ * @returns The image URL to display, or null if generation failed
+ */
+export async function ensureImage(
+    env: Env,
+    draft: { id: string; content: string; image_url?: string | null }
+): Promise<string | null> {
+    // If draft already has an image key, build the URL
+    if (draft.image_url) {
+        // Check if image exists in R2
+        const existing = await env.IMAGES.get(draft.image_url);
+        if (existing) {
+            // Return worker URL to serve the image
+            return `/image/${draft.image_url}`;
+        }
+        // Image key exists but file missing - regenerate
+        console.log('Image key exists but file missing, regenerating...');
+    }
+
+    // Parse content to generate image
+    let content: DraftContent;
+    try {
+        content = JSON.parse(draft.content) as DraftContent;
+    } catch {
+        console.error('Failed to parse draft content for image generation');
+        return null;
+    }
+
+    // Generate and store
+    console.log('Generating image on-demand for draft:', draft.id);
+    const imageKey = await generateAndStoreImage(env, content, draft.id);
+
+    if (!imageKey) {
+        return null;
+    }
+
+    // Return the worker URL to serve the image
+    return `/image/${imageKey}`;
+}
+
+/**
  * Build the prompt for content generation
  */
 function buildContentPrompt(source: ContentSource): string {

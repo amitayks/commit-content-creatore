@@ -3,10 +3,10 @@
  */
 
 import type { Env, GitHubPullRequestEvent, GitHubPushEvent, DraftContent, ContentSource } from '../types';
-import { getWatchingRepos, getRepoByOwnerRepo, createDraft, parseRepoConfig, updateDraft } from '../services/db';
+import { getRepoByOwnerRepo, createDraft, parseRepoConfig } from '../services/db';
 import { verifyWebhookSignature } from '../services/webhook';
-import { generateContent, generateAndStoreImage } from '../services/grok';
-import { sendMessage, sendPhoto } from '../services/telegram';
+import { generateContent } from '../services/grok';
+import { sendMessage } from '../services/telegram';
 
 interface WebhookResult {
     processed: boolean;
@@ -205,7 +205,7 @@ async function handlePushEvent(
             content: JSON.stringify(draftContent),
         });
 
-        // Send notification FIRST to avoid timeout
+        // Send notification (image will be generated on-demand when viewing)
         await sendNotification(
             env,
             'push',
@@ -213,27 +213,8 @@ async function handlePushEvent(
             commit.message.split('\n')[0],
             repoFullName,
             draftId,
-            draftContent,
-            null // No image yet
+            draftContent
         );
-
-        // Try to generate image after notification (may timeout but notification is sent)
-        const shouldGenImage = draftContent.format === 'thread'
-            ? config.alwaysGenerateThreadImage
-            : Math.random() < config.singleTweetImageProbability;
-
-        if (shouldGenImage) {
-            try {
-                console.log('Generating image for webhook draft...');
-                const imageKey = await generateAndStoreImage(env, draftContent, draftId);
-                if (imageKey) {
-                    await updateDraft(env, draftId, { image_url: imageKey });
-                    console.log('Image generated and stored:', imageKey);
-                }
-            } catch (imgError) {
-                console.error('Image generation failed (non-fatal):', imgError);
-            }
-        }
 
         return { processed: true, message: `Created draft for push ${commit.id.slice(0, 7)}` };
     } catch (error) {
@@ -252,8 +233,7 @@ async function sendNotification(
     title: string,
     repo: string,
     draftId: string,
-    content: DraftContent,
-    imageKey?: string | null
+    content: DraftContent
 ): Promise<void> {
     const emoji = eventType === 'pr' ? '🔀' : '📤';
     const eventLabel = eventType === 'pr' ? `PR #${number} Merged` : `${number} commit${number > 1 ? 's' : ''} pushed`;
@@ -283,15 +263,5 @@ I've auto-generated content for this. Review and approve?`;
         ],
     ];
 
-    // If we have an image stored in R2, we need to construct a full URL
-    // For now, use text-only notification since R2 images need worker URL
-    if (imageKey) {
-        // Note: To send R2 images via Telegram, we'd need full URL access
-        // For now, just note in the message that image was generated
-        const textWithImage = text + '\n\n🖼️ <i>Image generated and attached to draft</i>';
-        await sendMessage(env, env.TELEGRAM_CHAT_ID, textWithImage, keyboard);
-    } else {
-        await sendMessage(env, env.TELEGRAM_CHAT_ID, text, keyboard);
-    }
+    await sendMessage(env, env.TELEGRAM_CHAT_ID, text, keyboard);
 }
-
