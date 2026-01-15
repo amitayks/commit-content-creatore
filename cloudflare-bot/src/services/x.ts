@@ -161,7 +161,7 @@ export async function postThread(
 }
 
 /**
- * Upload media to X
+ * Upload media to X from URL
  */
 export async function uploadMedia(env: Env, imageUrl: string): Promise<string> {
     // Download the image
@@ -171,6 +171,13 @@ export async function uploadMedia(env: Env, imageUrl: string): Promise<string> {
     }
 
     const imageBuffer = await imageResponse.arrayBuffer();
+    return uploadMediaFromBuffer(env, imageBuffer);
+}
+
+/**
+ * Upload media to X from ArrayBuffer (for R2 images)
+ */
+export async function uploadMediaFromBuffer(env: Env, imageBuffer: ArrayBuffer): Promise<string> {
 
     // Convert to base64 without stack overflow (chunked approach)
     const bytes = new Uint8Array(imageBuffer);

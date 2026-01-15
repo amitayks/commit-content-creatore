@@ -9,7 +9,7 @@ import { editMessage, answerCallback, sendPhoto, deleteMessage, sendMessage } fr
 import { getChatState, updateChatState, parseContext, getDraft, updateDraftStatus, scheduleDraft, deleteDraft, getAllDrafts, createPublished, getRepo, updateRepo, deleteRepo, updateDraft } from '../services/db';
 import { generateContent, generateImage, ensureImage } from '../services/grok';
 import { getContentSource } from '../services/github';
-import { postThread, uploadMedia } from '../services/x';
+import { postThread, uploadMedia, uploadMediaFromBuffer } from '../services/x';
 import { deleteWebhook } from '../services/webhook';
 import { parseRepoConfig } from '../services/db';
 import {
@@ -255,38 +255,38 @@ async function handleAction(
             try {
                 const content = JSON.parse(draft.content) as DraftContent;
 
-                let imageUrl: string | null = null;
+                let mediaId: string | undefined;
 
                 console.log('Publishing draft, image_url:', draft.image_url);
 
                 // Check if draft already has an image stored in R2
                 if (draft.image_url && draft.image_url.startsWith('drafts/')) {
-                    // It's an R2 key - use worker URL to serve it
+                    // It's an R2 key - read directly from R2 (can't fetch our own worker URL)
                     const r2Object = await env.IMAGES.get(draft.image_url);
                     console.log('R2 object exists:', !!r2Object);
                     if (r2Object) {
-                        imageUrl = `https://content-bot.keisarcontentcreator.workers.dev/image/${draft.image_url}`;
-                        console.log('Using R2 image via worker URL:', imageUrl);
+                        console.log('Reading image directly from R2...');
+                        const imageBuffer = await r2Object.arrayBuffer();
+                        console.log('Uploading image to X from R2 buffer...');
+                        mediaId = await uploadMediaFromBuffer(env, imageBuffer);
+                        console.log('Media upload result:', mediaId);
                     }
                 } else if (draft.image_url) {
-                    // Already a URL
-                    imageUrl = draft.image_url;
-                    console.log('Using existing URL:', imageUrl);
+                    // Already a URL - fetch and upload
+                    console.log('Using existing URL:', draft.image_url);
+                    mediaId = await uploadMedia(env, draft.image_url);
+                    console.log('Media upload result:', mediaId);
                 }
 
                 // Generate image if none exists
-                if (!imageUrl) {
+                if (!mediaId) {
                     console.log('No image available, generating...');
-                    imageUrl = await generateImage(env, content);
-                }
-
-                console.log('Final image URL for publish:', imageUrl);
-
-                let mediaId: string | undefined;
-                if (imageUrl) {
-                    console.log('Uploading image to X...');
-                    mediaId = await uploadMedia(env, imageUrl);
-                    console.log('Media upload result:', mediaId);
+                    const imageUrl = await generateImage(env, content);
+                    if (imageUrl) {
+                        console.log('Uploading generated image to X...');
+                        mediaId = await uploadMedia(env, imageUrl);
+                        console.log('Media upload result:', mediaId);
+                    }
                 }
 
                 // Post thread
@@ -300,7 +300,7 @@ async function handleAction(
                     pr_number: draft.pr_number,
                     tweet_ids: tweetIds,
                     tweet_url: url,
-                    image_url: imageUrl || undefined,
+                    image_url: draft.image_url || undefined,
                 });
 
                 return renderSuccess(`📤 Published to X!\n\n${url}`);
@@ -323,10 +323,27 @@ async function handleAction(
                 try {
                     const content = JSON.parse(draft.content) as DraftContent;
 
-                    const imageUrl = await generateImage(env, content);
                     let mediaId: string | undefined;
-                    if (imageUrl) {
-                        mediaId = await uploadMedia(env, imageUrl);
+
+                    // Check if draft already has an image stored in R2
+                    if (draft.image_url && draft.image_url.startsWith('drafts/')) {
+                        const r2Object = await env.IMAGES.get(draft.image_url);
+                        if (r2Object) {
+                            console.log('Reading R2 image for batch publish:', draft.image_url);
+                            const imageBuffer = await r2Object.arrayBuffer();
+                            mediaId = await uploadMediaFromBuffer(env, imageBuffer);
+                        }
+                    } else if (draft.image_url) {
+                        mediaId = await uploadMedia(env, draft.image_url);
+                    }
+
+                    // Generate image if none exists
+                    if (!mediaId) {
+                        console.log('No R2 image, generating for batch publish...');
+                        const imageUrl = await generateImage(env, content);
+                        if (imageUrl) {
+                            mediaId = await uploadMedia(env, imageUrl);
+                        }
                     }
 
                     const { tweetIds, url } = await postThread(env, content, mediaId);
@@ -337,7 +354,7 @@ async function handleAction(
                         pr_number: draft.pr_number,
                         tweet_ids: tweetIds,
                         tweet_url: url,
-                        image_url: imageUrl || undefined,
+                        image_url: draft.image_url || undefined,
                     });
 
                     results.push(`✅ PR #${draft.pr_number}: ${url}`);
