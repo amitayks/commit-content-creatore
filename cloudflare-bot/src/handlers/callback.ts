@@ -1,7 +1,8 @@
 /**
  * Callback Handler - Process button clicks
- * 
+ *
  * Key pattern: Button clicks EDIT the current message (silent UI update)
+ * SECURITY: All operations verify ownership via chatId
  */
 
 import type { Env, TelegramCallbackQuery, DraftContent } from '../types';
@@ -12,6 +13,7 @@ import { getContentSource } from '../services/github';
 import { postThread, uploadMedia, uploadMediaFromBuffer } from '../services/x';
 import { deleteWebhook } from '../services/webhook';
 import { parseRepoConfig } from '../services/db';
+import { sanitizeError } from '../services/security';
 import {
     renderHome,
     renderDraftsList,
@@ -32,7 +34,7 @@ import {
 
 /**
  * Handle callback query (button click)
- * 
+ *
  * Button clicks ALWAYS edit the current message (silent UI update)
  */
 export async function handleCallback(
@@ -66,7 +68,7 @@ export async function handleCallback(
 
             case 'draft': {
                 // Fetch draft and ensure it has an image
-                const draft = await getDraft(env, value);
+                const draft = await getDraft(env, value, chatId);
                 if (!draft) {
                     view = renderError('Draft not found.');
                     break;
@@ -75,13 +77,13 @@ export async function handleCallback(
                 // Generate image on-demand if needed
                 let imageUrl: string | null = null;
                 try {
-                    imageUrl = await ensureImage(env, draft);
+                    imageUrl = await ensureImage(env, chatId, draft);
                 } catch (imgError) {
-                    console.error('Image generation failed:', imgError);
+                    console.error('Image generation failed:', sanitizeError(imgError));
                 }
 
                 // Get the view with buttons
-                view = await renderDraftDetail(env, value);
+                view = await renderDraftDetail(env, chatId, value);
 
                 // Update state
                 await updateChatState(env, chatId, {
@@ -116,7 +118,7 @@ export async function handleCallback(
 
             case 'page':
                 const page = parseInt(value, 10) || 0;
-                view = await renderDraftsList(env, page);
+                view = await renderDraftsList(env, chatId, page);
                 await updateChatState(env, chatId, {
                     current_view: 'drafts',
                     context: { page },
@@ -125,7 +127,7 @@ export async function handleCallback(
 
             case 'repo':
                 // View repo detail
-                view = await renderRepoDetail(env, value);
+                view = await renderRepoDetail(env, chatId, value);
                 await updateChatState(env, chatId, {
                     current_view: 'repo',
                     context: { selected_repo_id: value },
@@ -134,7 +136,7 @@ export async function handleCallback(
 
             case 'config':
                 // Handle config toggle
-                view = await handleConfigToggle(env, value, extra);
+                view = await handleConfigToggle(env, chatId, value, extra);
                 break;
 
             default:
@@ -159,8 +161,8 @@ export async function handleCallback(
         }
         await answerCallback(env, callback.id);
     } catch (error) {
-        console.error('Callback handler error:', error);
-        const view = renderError(String(error));
+        console.error('Callback handler error:', sanitizeError(error));
+        const view = renderError('An error occurred. Please try again.');
         try {
             await editMessage(env, chatId, messageId, view.text, view.keyboard);
         } catch {
@@ -185,7 +187,7 @@ async function handleViewChange(
 
         case 'drafts':
             await updateChatState(env, chatId, { current_view: 'drafts', context: { page: 0 } });
-            return renderDraftsList(env, 0);
+            return renderDraftsList(env, chatId, 0);
 
         case 'help':
             await updateChatState(env, chatId, { current_view: 'help', context: null });
@@ -214,7 +216,7 @@ async function handleViewChange(
 
         case 'repos':
             await updateChatState(env, chatId, { current_view: 'repos', context: null });
-            return renderReposList(env);
+            return renderReposList(env, chatId);
 
         default:
             return renderHome();
@@ -233,7 +235,7 @@ async function handleAction(
 ): Promise<{ text: string; keyboard: { text: string; callback_data: string }[][] }> {
     switch (action) {
         case 'approve': {
-            await updateDraftStatus(env, draftId, 'approved');
+            await updateDraftStatus(env, draftId, chatId, 'approved');
             return renderSuccess(
                 '✅ Draft approved!\n\n' +
                 'Use 🚀 Publish on the dashboard to publish, or 📅 Schedule for later.'
@@ -241,13 +243,13 @@ async function handleAction(
         }
 
         case 'reject': {
-            await updateDraftStatus(env, draftId, 'rejected');
+            await updateDraftStatus(env, draftId, chatId, 'rejected');
             return renderSuccess('❌ Draft rejected and archived.');
         }
 
         case 'publish': {
             // Publish single draft
-            const draft = await getDraft(env, draftId);
+            const draft = await getDraft(env, draftId, chatId);
             if (!draft) {
                 return renderError('Draft not found.');
             }
@@ -294,8 +296,8 @@ async function handleAction(
                 const { tweetIds, url } = await postThread(env, content, mediaId);
 
                 // Update status and create published record
-                await updateDraftStatus(env, draftId, 'published');
-                await createPublished(env, {
+                await updateDraftStatus(env, draftId, chatId, 'published');
+                await createPublished(env, chatId, {
                     draft_id: draftId,
                     pr_number: draft.pr_number,
                     tweet_ids: tweetIds,
@@ -305,13 +307,13 @@ async function handleAction(
 
                 return renderSuccess(`📤 Published to X!\n\n${url}`);
             } catch (error) {
-                return renderError(`Publishing failed: ${String(error)}`);
+                return renderError(`Publishing failed. Please try again.`);
             }
         }
 
         case 'publish_approved': {
             // Publish all approved drafts
-            const drafts = await getAllDrafts(env, 'approved');
+            const drafts = await getAllDrafts(env, chatId, 'approved');
 
             if (drafts.length === 0) {
                 return renderError('No approved drafts to publish.\n\nApprove some drafts first!');
@@ -348,8 +350,8 @@ async function handleAction(
 
                     const { tweetIds, url } = await postThread(env, content, mediaId);
 
-                    await updateDraftStatus(env, draft.id, 'published');
-                    await createPublished(env, {
+                    await updateDraftStatus(env, draft.id, chatId, 'published');
+                    await createPublished(env, chatId, {
                         draft_id: draft.id,
                         pr_number: draft.pr_number,
                         tweet_ids: tweetIds,
@@ -359,7 +361,7 @@ async function handleAction(
 
                     results.push(`✅ PR #${draft.pr_number}: ${url}`);
                 } catch (error) {
-                    results.push(`❌ PR #${draft.pr_number}: ${String(error)}`);
+                    results.push(`❌ PR #${draft.pr_number}: Publishing failed`);
                 }
             }
 
@@ -367,7 +369,7 @@ async function handleAction(
         }
 
         case 'regenerate': {
-            const draft = await getDraft(env, draftId);
+            const draft = await getDraft(env, draftId, chatId);
             if (!draft) {
                 return renderError('Draft not found.');
             }
@@ -375,12 +377,12 @@ async function handleAction(
             try {
                 const source = await getContentSource(env, draft.commit_sha);
                 const newContent = await generateContent(env, source);
-                await updateDraftStatus(env, draftId, 'draft'); // Reset to draft
+                await updateDraftStatus(env, draftId, chatId, 'draft'); // Reset to draft
                 // Note: Would need updateDraftContent here
 
-                return renderDraftDetail(env, draftId);
+                return renderDraftDetail(env, chatId, draftId);
             } catch (error) {
-                return renderError(`Regeneration failed: ${String(error)}`);
+                return renderError('Regeneration failed. Please try again.');
             }
         }
 
@@ -400,7 +402,7 @@ Format: <code>2024-01-15 14:00</code>`,
         }
 
         case 'unschedule': {
-            await updateDraftStatus(env, draftId, 'draft');
+            await updateDraftStatus(env, draftId, chatId, 'draft');
             return renderSuccess('Schedule cancelled. Draft returned to pending status.');
         }
 
@@ -445,37 +447,41 @@ Type your instructions below:`,
         case 'watch': {
             // Start watching a repo (draftId is actually repoId)
             const repoId = draftId;
-            await updateRepo(env, repoId, { is_watching: 1 });
-            return renderRepoDetail(env, repoId);
+            await updateRepo(env, repoId, chatId, { is_watching: 1 });
+            return renderRepoDetail(env, chatId, repoId);
         }
 
         case 'unwatch': {
             // Stop watching a repo
             const repoId = draftId;
-            await updateRepo(env, repoId, { is_watching: 0 });
-            return renderRepoDetail(env, repoId);
+            await updateRepo(env, repoId, chatId, { is_watching: 0 });
+            return renderRepoDetail(env, chatId, repoId);
         }
 
         case 'delete_repo': {
             // Show delete confirmation
             const repoId = draftId;
-            return renderDeleteRepoConfirm(env, repoId);
+            return renderDeleteRepoConfirm(env, chatId, repoId);
         }
 
         case 'confirm_delete_repo': {
             // Delete the repo
             const repoId = draftId;
-            const repo = await getRepo(env, repoId);
+            const repo = await getRepo(env, repoId, chatId);
             if (!repo) {
                 return renderError('Repository not found.');
             }
 
             // Delete webhook from GitHub if it exists
             if (repo.webhook_id) {
-                await deleteWebhook(env, repo.owner, repo.repo, repo.webhook_id);
+                try {
+                    await deleteWebhook(env, repo.owner, repo.repo, repo.webhook_id);
+                } catch {
+                    // Continue even if webhook deletion fails
+                }
             }
 
-            await deleteRepo(env, repoId);
+            await deleteRepo(env, repoId, chatId);
             return {
                 text: `✅ <b>Repository Deleted</b>
 
@@ -487,7 +493,7 @@ Type your instructions below:`,
         case 'edit_repo': {
             // Show config editing view
             const repoId = draftId;
-            return renderRepoConfig(env, repoId);
+            return renderRepoConfig(env, chatId, repoId);
         }
 
         default:
@@ -500,10 +506,11 @@ Type your instructions below:`,
  */
 async function handleConfigToggle(
     env: Env,
+    chatId: string,
     setting: string,
     repoId: string
 ): Promise<{ text: string; keyboard: { text: string; callback_data: string }[][] }> {
-    const repo = await getRepo(env, repoId);
+    const repo = await getRepo(env, repoId, chatId);
     if (!repo) {
         return renderError('Repository not found.');
     }
@@ -558,13 +565,12 @@ async function handleConfigToggle(
             break;
         }
         default:
-            return renderRepoConfig(env, repoId);
+            return renderRepoConfig(env, chatId, repoId);
     }
 
     // Save updated config
-    await updateRepo(env, repoId, { config });
+    await updateRepo(env, repoId, chatId, { config });
 
     // Return updated config view
-    return renderRepoConfig(env, repoId);
+    return renderRepoConfig(env, chatId, repoId);
 }
-

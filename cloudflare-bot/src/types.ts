@@ -16,6 +16,8 @@ export interface Env {
     X_API_SECRET: string;
     X_ACCESS_TOKEN: string;
     X_ACCESS_SECRET: string;
+    // Security: Admin secret for protected endpoints
+    ADMIN_SECRET?: string;
 }
 
 // Draft status
@@ -40,6 +42,7 @@ export interface DraftContent {
 // Draft record from D1
 export interface Draft {
     id: string;
+    chat_id: string; // Owner's Telegram chat ID
     pr_number: number;
     pr_title: string;
     commit_sha: string;
@@ -63,6 +66,7 @@ export interface ChatState {
 // Published post record
 export interface Published {
     id: string;
+    chat_id: string; // Owner's Telegram chat ID
     draft_id: string;
     pr_number: number;
     tweet_ids: string; // JSON array
@@ -104,6 +108,7 @@ export interface RepoConfig {
 // Watched repo record from D1
 export interface WatchedRepo {
     id: string;
+    chat_id: string; // Owner's Telegram chat ID
     owner: string;
     repo: string;
     is_watching: number; // 0 or 1

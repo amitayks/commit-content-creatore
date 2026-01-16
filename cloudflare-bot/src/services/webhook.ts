@@ -1,8 +1,11 @@
 /**
  * Webhook Service - Create/delete GitHub webhooks and verify signatures
+ *
+ * SECURITY: Uses timing-safe comparison for signature verification
  */
 
 import type { Env } from '../types';
+import { timingSafeEqual, sanitizeError } from './security';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -39,15 +42,17 @@ export async function createWebhook(
 
         if (response.ok) {
             const data = await response.json() as { id: number };
-            console.log(`Created webhook ${data.id} for ${owner}/${repo}`);
+            // SECURITY: Only log non-sensitive info
+            console.log(`Created webhook for ${owner}/${repo}`);
             return String(data.id);
         }
 
-        const error = await response.text();
-        console.error(`Failed to create webhook for ${owner}/${repo}: ${response.status} - ${error}`);
+        // SECURITY: Don't log full error response (may contain tokens in URL)
+        console.error(`Failed to create webhook for ${owner}/${repo}: ${response.status}`);
         return null;
     } catch (error) {
-        console.error(`Error creating webhook for ${owner}/${repo}:`, error);
+        // SECURITY: Use sanitized error
+        console.error(`Error creating webhook for ${owner}/${repo}:`, sanitizeError(error));
         return null;
     }
 }
@@ -76,26 +81,30 @@ export async function deleteWebhook(
 
         if (response.ok || response.status === 404) {
             // 404 means already deleted, which is fine
-            console.log(`Deleted webhook ${webhookId} from ${owner}/${repo}`);
+            // SECURITY: Only log non-sensitive info
+            console.log(`Deleted webhook from ${owner}/${repo}`);
             return true;
         }
 
-        console.error(`Failed to delete webhook ${webhookId}: ${response.status}`);
+        console.error(`Failed to delete webhook: ${response.status}`);
         return false;
     } catch (error) {
-        console.error(`Error deleting webhook ${webhookId}:`, error);
+        // SECURITY: Use sanitized error
+        console.error(`Error deleting webhook:`, sanitizeError(error));
         return false;
     }
 }
 
 /**
- * Verify GitHub webhook signature
+ * Verify GitHub webhook signature using timing-safe comparison
+ * SECURITY: Uses HMAC-SHA256 with timing-safe comparison to prevent timing attacks
  */
 export async function verifyWebhookSignature(
     secret: string,
     payload: string,
     signature: string
 ): Promise<boolean> {
+    // SECURITY: Reject missing signatures
     if (!signature) {
         return false;
     }
@@ -107,6 +116,11 @@ export async function verifyWebhookSignature(
     }
 
     const expectedSignature = parts[1];
+
+    // SECURITY: Validate signature format (hex string)
+    if (!/^[a-f0-9]{64}$/i.test(expectedSignature)) {
+        return false;
+    }
 
     // Generate HMAC-SHA256
     const encoder = new TextEncoder();
@@ -129,5 +143,6 @@ export async function verifyWebhookSignature(
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 
-    return computedSignature === expectedSignature;
+    // SECURITY: Use timing-safe comparison to prevent timing attacks
+    return await timingSafeEqual(computedSignature, expectedSignature.toLowerCase());
 }

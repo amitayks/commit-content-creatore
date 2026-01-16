@@ -16,3 +16,28 @@ bucket_name = "content-bot-images"
 # Cron triggers for scheduled publishing
 [triggers]
 crons = ["0 * * * *"]  # Every hour
+
+# ===========================================
+# SECRETS CONFIGURATION (set via wrangler secret put)
+# ===========================================
+# Required secrets:
+#   - TELEGRAM_BOT_TOKEN: Your Telegram bot token from @BotFather
+#   - TELEGRAM_CHAT_ID: Your authorized Telegram user ID (for authorization)
+#   - GITHUB_TOKEN: GitHub personal access token with repo webhook permissions
+#   - GITHUB_WEBHOOK_SECRET: Strong secret for GitHub webhook signature verification (32+ chars recommended)
+#   - GROK_API_KEY: X.ai API key for content generation
+#   - X_API_KEY: Twitter/X API key
+#   - X_API_SECRET: Twitter/X API secret
+#   - X_ACCESS_TOKEN: Twitter/X access token
+#   - X_ACCESS_SECRET: Twitter/X access token secret
+#
+# Optional secrets:
+#   - ADMIN_SECRET: Secret for protecting /setup and /migrate endpoints
+#                   Generate with: openssl rand -hex 32
+#                   Set with: wrangler secret put ADMIN_SECRET
+#
+# SECURITY NOTES:
+# - Never commit secrets to version control
+# - Use strong, randomly generated values (32+ characters)
+# - Rotate secrets periodically
+# - GITHUB_WEBHOOK_SECRET should be cryptographically strong

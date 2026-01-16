@@ -1,5 +1,7 @@
 /**
  * Database Service - D1 operations for drafts, chat state, published posts, and repos
+ *
+ * SECURITY: All data operations require and filter by chat_id for ownership verification
  */
 
 import type { Env, Draft, ChatState, Published, DraftStatus, ChatContext, WatchedRepo, RepoConfig } from '../types';
@@ -15,61 +17,74 @@ function generateId(): string {
 // ==================== DRAFTS ====================
 
 /**
- * Get a draft by ID
+ * Get a draft by ID - requires chat_id for ownership verification
  */
-export async function getDraft(env: Env, id: string): Promise<Draft | null> {
+export async function getDraft(env: Env, id: string, chatId: string): Promise<Draft | null> {
+    return env.DB.prepare('SELECT * FROM drafts WHERE id = ? AND chat_id = ?')
+        .bind(id, chatId)
+        .first<Draft>();
+}
+
+/**
+ * Get a draft by ID without ownership check (for internal use only, e.g., cron jobs)
+ * SECURITY: Only use this for system operations with env.TELEGRAM_CHAT_ID
+ */
+export async function getDraftInternal(env: Env, id: string): Promise<Draft | null> {
     return env.DB.prepare('SELECT * FROM drafts WHERE id = ?')
         .bind(id)
         .first<Draft>();
 }
 
 /**
- * Get all drafts, optionally filtered by status
+ * Get all drafts for a user, optionally filtered by status
  */
 export async function getAllDrafts(
     env: Env,
+    chatId: string,
     status?: DraftStatus,
     limit = 10,
     offset = 0
 ): Promise<Draft[]> {
     if (status) {
         const result = await env.DB.prepare(
-            'SELECT * FROM drafts WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
+            'SELECT * FROM drafts WHERE chat_id = ? AND status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
         )
-            .bind(status, limit, offset)
+            .bind(chatId, status, limit, offset)
             .all<Draft>();
         return result.results || [];
     }
 
     const result = await env.DB.prepare(
-        'SELECT * FROM drafts ORDER BY created_at DESC LIMIT ? OFFSET ?'
+        'SELECT * FROM drafts WHERE chat_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?'
     )
-        .bind(limit, offset)
+        .bind(chatId, limit, offset)
         .all<Draft>();
     return result.results || [];
 }
 
 /**
- * Count drafts by status
+ * Count drafts for a user by status
  */
-export async function countDrafts(env: Env, status?: DraftStatus): Promise<number> {
+export async function countDrafts(env: Env, chatId: string, status?: DraftStatus): Promise<number> {
     if (status) {
-        const result = await env.DB.prepare('SELECT COUNT(*) as count FROM drafts WHERE status = ?')
-            .bind(status)
+        const result = await env.DB.prepare('SELECT COUNT(*) as count FROM drafts WHERE chat_id = ? AND status = ?')
+            .bind(chatId, status)
             .first<{ count: number }>();
         return result?.count || 0;
     }
 
-    const result = await env.DB.prepare('SELECT COUNT(*) as count FROM drafts')
+    const result = await env.DB.prepare('SELECT COUNT(*) as count FROM drafts WHERE chat_id = ?')
+        .bind(chatId)
         .first<{ count: number }>();
     return result?.count || 0;
 }
 
 /**
- * Create a new draft
+ * Create a new draft with ownership
  */
 export async function createDraft(
     env: Env,
+    chatId: string,
     data: {
         pr_number: number;
         pr_title: string;
@@ -79,52 +94,57 @@ export async function createDraft(
 ): Promise<string> {
     const id = generateId();
     await env.DB.prepare(
-        `INSERT INTO drafts (id, pr_number, pr_title, commit_sha, content)
-     VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO drafts (id, chat_id, pr_number, pr_title, commit_sha, content)
+         VALUES (?, ?, ?, ?, ?, ?)`
     )
-        .bind(id, data.pr_number, data.pr_title, data.commit_sha, data.content)
+        .bind(id, chatId, data.pr_number, data.pr_title, data.commit_sha, data.content)
         .run();
     return id;
 }
 
 /**
- * Update draft status
+ * Update draft status - verifies ownership
  */
 export async function updateDraftStatus(
     env: Env,
     id: string,
+    chatId: string,
     status: DraftStatus
-): Promise<void> {
-    await env.DB.prepare(
-        "UPDATE drafts SET status = ?, updated_at = datetime('now') WHERE id = ?"
+): Promise<boolean> {
+    const result = await env.DB.prepare(
+        "UPDATE drafts SET status = ?, updated_at = datetime('now') WHERE id = ? AND chat_id = ?"
     )
-        .bind(status, id)
+        .bind(status, id, chatId)
         .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
- * Update draft content (for regeneration)
+ * Update draft content - verifies ownership
  */
 export async function updateDraftContent(
     env: Env,
     id: string,
+    chatId: string,
     content: string
-): Promise<void> {
-    await env.DB.prepare(
-        "UPDATE drafts SET content = ?, updated_at = datetime('now') WHERE id = ?"
+): Promise<boolean> {
+    const result = await env.DB.prepare(
+        "UPDATE drafts SET content = ?, updated_at = datetime('now') WHERE id = ? AND chat_id = ?"
     )
-        .bind(content, id)
+        .bind(content, id, chatId)
         .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
- * Update draft fields (general)
+ * Update draft fields - verifies ownership
  */
 export async function updateDraft(
     env: Env,
     id: string,
+    chatId: string,
     updates: { content?: string; image_url?: string | null }
-): Promise<void> {
+): Promise<boolean> {
     const sets: string[] = [];
     const values: (string | null)[] = [];
 
@@ -137,35 +157,39 @@ export async function updateDraft(
         values.push(updates.image_url);
     }
 
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
 
     sets.push("updated_at = datetime('now')");
-    values.push(id);
+    values.push(id, chatId);
 
-    await env.DB.prepare(
-        `UPDATE drafts SET ${sets.join(', ')} WHERE id = ?`
+    const result = await env.DB.prepare(
+        `UPDATE drafts SET ${sets.join(', ')} WHERE id = ? AND chat_id = ?`
     )
         .bind(...values)
         .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
- * Schedule a draft
+ * Schedule a draft - verifies ownership
  */
 export async function scheduleDraft(
     env: Env,
     id: string,
+    chatId: string,
     scheduledAt: string
-): Promise<void> {
-    await env.DB.prepare(
-        "UPDATE drafts SET status = 'scheduled', scheduled_at = ?, updated_at = datetime('now') WHERE id = ?"
+): Promise<boolean> {
+    const result = await env.DB.prepare(
+        "UPDATE drafts SET status = 'scheduled', scheduled_at = ?, updated_at = datetime('now') WHERE id = ? AND chat_id = ?"
     )
-        .bind(scheduledAt, id)
+        .bind(scheduledAt, id, chatId)
         .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
- * Get scheduled drafts that are due
+ * Get scheduled drafts that are due (for cron job)
+ * SECURITY: Returns drafts for all users - only use in cron context
  */
 export async function getDueDrafts(env: Env): Promise<Draft[]> {
     const result = await env.DB.prepare(
@@ -175,10 +199,13 @@ export async function getDueDrafts(env: Env): Promise<Draft[]> {
 }
 
 /**
- * Delete a draft
+ * Delete a draft - verifies ownership
  */
-export async function deleteDraft(env: Env, id: string): Promise<void> {
-    await env.DB.prepare('DELETE FROM drafts WHERE id = ?').bind(id).run();
+export async function deleteDraft(env: Env, id: string, chatId: string): Promise<boolean> {
+    const result = await env.DB.prepare('DELETE FROM drafts WHERE id = ? AND chat_id = ?')
+        .bind(id, chatId)
+        .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 // ==================== CHAT STATE ====================
@@ -258,10 +285,11 @@ export function parseContext(state: ChatState): ChatContext {
 // ==================== PUBLISHED ====================
 
 /**
- * Create a published record
+ * Create a published record with ownership
  */
 export async function createPublished(
     env: Env,
+    chatId: string,
     data: {
         draft_id: string;
         pr_number: number;
@@ -272,11 +300,12 @@ export async function createPublished(
 ): Promise<string> {
     const id = generateId();
     await env.DB.prepare(
-        `INSERT INTO published (id, draft_id, pr_number, tweet_ids, tweet_url, image_url)
-     VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO published (id, chat_id, draft_id, pr_number, tweet_ids, tweet_url, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
         .bind(
             id,
+            chatId,
             data.draft_id,
             data.pr_number,
             JSON.stringify(data.tweet_ids),
@@ -288,40 +317,58 @@ export async function createPublished(
 }
 
 /**
- * Get published posts by PR number
+ * Get published posts by PR number for a user
  */
-export async function getPublishedByPR(env: Env, prNumber: number): Promise<Published[]> {
+export async function getPublishedByPR(env: Env, chatId: string, prNumber: number): Promise<Published[]> {
     const result = await env.DB.prepare(
-        'SELECT * FROM published WHERE pr_number = ? ORDER BY published_at DESC'
+        'SELECT * FROM published WHERE chat_id = ? AND pr_number = ? ORDER BY published_at DESC'
     )
-        .bind(prNumber)
+        .bind(chatId, prNumber)
         .all<Published>();
     return result.results || [];
 }
 
 /**
- * Delete a published record
+ * Delete a published record - verifies ownership
  */
-export async function deletePublished(env: Env, id: string): Promise<void> {
-    await env.DB.prepare('DELETE FROM published WHERE id = ?').bind(id).run();
+export async function deletePublished(env: Env, id: string, chatId: string): Promise<boolean> {
+    const result = await env.DB.prepare('DELETE FROM published WHERE id = ? AND chat_id = ?')
+        .bind(id, chatId)
+        .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 // ==================== REPOS ====================
 
 /**
- * Get all repos
+ * Get all repos for a user
  */
-export async function getRepos(env: Env): Promise<WatchedRepo[]> {
+export async function getRepos(env: Env, chatId: string): Promise<WatchedRepo[]> {
     const result = await env.DB.prepare(
-        'SELECT * FROM repos ORDER BY created_at DESC'
-    ).all<WatchedRepo>();
+        'SELECT * FROM repos WHERE chat_id = ? ORDER BY created_at DESC'
+    )
+        .bind(chatId)
+        .all<WatchedRepo>();
     return result.results || [];
 }
 
 /**
- * Get repos that are currently being watched
+ * Get repos that are currently being watched for a user
  */
-export async function getWatchingRepos(env: Env): Promise<WatchedRepo[]> {
+export async function getWatchingRepos(env: Env, chatId: string): Promise<WatchedRepo[]> {
+    const result = await env.DB.prepare(
+        'SELECT * FROM repos WHERE chat_id = ? AND is_watching = 1 ORDER BY created_at DESC'
+    )
+        .bind(chatId)
+        .all<WatchedRepo>();
+    return result.results || [];
+}
+
+/**
+ * Get all watching repos (for GitHub webhook processing)
+ * SECURITY: Only use in webhook context to match incoming events
+ */
+export async function getAllWatchingRepos(env: Env): Promise<WatchedRepo[]> {
     const result = await env.DB.prepare(
         'SELECT * FROM repos WHERE is_watching = 1 ORDER BY created_at DESC'
     ).all<WatchedRepo>();
@@ -329,18 +376,33 @@ export async function getWatchingRepos(env: Env): Promise<WatchedRepo[]> {
 }
 
 /**
- * Get a repo by ID
+ * Get a repo by ID - verifies ownership
  */
-export async function getRepo(env: Env, id: string): Promise<WatchedRepo | null> {
-    return env.DB.prepare('SELECT * FROM repos WHERE id = ?')
-        .bind(id)
+export async function getRepo(env: Env, id: string, chatId: string): Promise<WatchedRepo | null> {
+    return env.DB.prepare('SELECT * FROM repos WHERE id = ? AND chat_id = ?')
+        .bind(id, chatId)
         .first<WatchedRepo>();
 }
 
 /**
- * Get a repo by owner and repo name
+ * Get a repo by owner and repo name for a user
  */
 export async function getRepoByOwnerRepo(
+    env: Env,
+    chatId: string,
+    owner: string,
+    repo: string
+): Promise<WatchedRepo | null> {
+    return env.DB.prepare('SELECT * FROM repos WHERE chat_id = ? AND owner = ? AND repo = ?')
+        .bind(chatId, owner, repo)
+        .first<WatchedRepo>();
+}
+
+/**
+ * Get a repo by owner and repo name (for webhook processing)
+ * SECURITY: Only use in GitHub webhook context
+ */
+export async function getRepoByOwnerRepoAny(
     env: Env,
     owner: string,
     repo: string
@@ -351,10 +413,11 @@ export async function getRepoByOwnerRepo(
 }
 
 /**
- * Create a new repo
+ * Create a new repo with ownership
  */
 export async function createRepo(
     env: Env,
+    chatId: string,
     data: {
         owner: string;
         repo: string;
@@ -366,27 +429,28 @@ export async function createRepo(
     const config = data.config || DEFAULT_REPO_CONFIG;
 
     await env.DB.prepare(
-        `INSERT INTO repos (id, owner, repo, config, webhook_id)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT INTO repos (id, chat_id, owner, repo, config, webhook_id)
+         VALUES (?, ?, ?, ?, ?, ?)`
     )
-        .bind(id, data.owner, data.repo, JSON.stringify(config), data.webhook_id || null)
+        .bind(id, chatId, data.owner, data.repo, JSON.stringify(config), data.webhook_id || null)
         .run();
 
     return id;
 }
 
 /**
- * Update a repo
+ * Update a repo - verifies ownership
  */
 export async function updateRepo(
     env: Env,
     id: string,
+    chatId: string,
     updates: {
         is_watching?: number;
         config?: RepoConfig;
         webhook_id?: string | null;
     }
-): Promise<void> {
+): Promise<boolean> {
     const sets: string[] = [];
     const values: (string | number | null)[] = [];
 
@@ -403,23 +467,27 @@ export async function updateRepo(
         values.push(updates.webhook_id);
     }
 
-    if (sets.length === 0) return;
+    if (sets.length === 0) return false;
 
     sets.push("updated_at = datetime('now')");
-    values.push(id);
+    values.push(id, chatId);
 
-    await env.DB.prepare(
-        `UPDATE repos SET ${sets.join(', ')} WHERE id = ?`
+    const result = await env.DB.prepare(
+        `UPDATE repos SET ${sets.join(', ')} WHERE id = ? AND chat_id = ?`
     )
         .bind(...values)
         .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
- * Delete a repo
+ * Delete a repo - verifies ownership
  */
-export async function deleteRepo(env: Env, id: string): Promise<void> {
-    await env.DB.prepare('DELETE FROM repos WHERE id = ?').bind(id).run();
+export async function deleteRepo(env: Env, id: string, chatId: string): Promise<boolean> {
+    const result = await env.DB.prepare('DELETE FROM repos WHERE id = ? AND chat_id = ?')
+        .bind(id, chatId)
+        .run();
+    return (result.meta?.changes ?? 0) > 0;
 }
 
 /**
@@ -432,4 +500,3 @@ export function parseRepoConfig(repo: WatchedRepo): RepoConfig {
         return DEFAULT_REPO_CONFIG;
     }
 }
-

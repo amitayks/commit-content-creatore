@@ -3,7 +3,7 @@
  */
 
 import type { Env, GitHubPullRequestEvent, GitHubPushEvent, DraftContent, ContentSource } from '../types';
-import { getRepoByOwnerRepo, createDraft, parseRepoConfig } from '../services/db';
+import { getRepoByOwnerRepoAny, createDraft, parseRepoConfig } from '../services/db';
 import { verifyWebhookSignature } from '../services/webhook';
 import { generateContent } from '../services/grok';
 import { sendMessage } from '../services/telegram';
@@ -48,25 +48,28 @@ export async function handleGitHubWebhook(
     const [owner, repo] = repoFullName.split('/');
 
     // Check if this repo is being watched
-    const watchedRepo = await getRepoByOwnerRepo(env, owner, repo);
+    // SECURITY: Use getRepoByOwnerRepoAny for webhook context (no user session)
+    const watchedRepo = await getRepoByOwnerRepoAny(env, owner, repo);
     if (!watchedRepo || !watchedRepo.is_watching) {
         console.log(`Ignoring webhook for unwatched repo: ${repoFullName}`);
         return { processed: false, message: 'Repo not watched' };
     }
 
     const config = parseRepoConfig(watchedRepo);
+    // SECURITY: Get chatId from watched repo for ownership association
+    const chatId = watchedRepo.chat_id;
 
     // Handle based on event type
     switch (event) {
         case 'pull_request':
             if (config.watchPRs) {
-                return handlePullRequestEvent(env, payload as GitHubPullRequestEvent, config);
+                return handlePullRequestEvent(env, chatId, payload as GitHubPullRequestEvent, config);
             }
             return { processed: false, message: 'PR watching disabled for this repo' };
 
         case 'push':
             if (config.watchPushes) {
-                return handlePushEvent(env, payload as GitHubPushEvent, config);
+                return handlePushEvent(env, chatId, payload as GitHubPushEvent, config);
             }
             return { processed: false, message: 'Push watching disabled for this repo' };
 
@@ -80,6 +83,7 @@ export async function handleGitHubWebhook(
  */
 async function handlePullRequestEvent(
     env: Env,
+    chatId: string,
     event: GitHubPullRequestEvent,
     config: ReturnType<typeof parseRepoConfig>
 ): Promise<WebhookResult> {
@@ -121,8 +125,9 @@ async function handlePullRequestEvent(
         // Generate content
         const draftContent = await generateContent(env, contentSource);
 
-        // Save draft
-        const draftId = await createDraft(env, {
+        // Save draft with ownership
+        // SECURITY: Associate draft with repo owner's chatId
+        const draftId = await createDraft(env, chatId, {
             pr_number: pr.number,
             pr_title: pr.title,
             commit_sha: pr.head.sha,
@@ -152,6 +157,7 @@ async function handlePullRequestEvent(
  */
 async function handlePushEvent(
     env: Env,
+    chatId: string,
     event: GitHubPushEvent,
     config: ReturnType<typeof parseRepoConfig>
 ): Promise<WebhookResult> {
@@ -197,8 +203,9 @@ async function handlePushEvent(
         // Generate content
         const draftContent = await generateContent(env, contentSource);
 
-        // Save draft
-        const draftId = await createDraft(env, {
+        // Save draft with ownership
+        // SECURITY: Associate draft with repo owner's chatId
+        const draftId = await createDraft(env, chatId, {
             pr_number: 0, // No PR for direct pushes
             pr_title: commit.message.split('\n')[0],
             commit_sha: commit.id,

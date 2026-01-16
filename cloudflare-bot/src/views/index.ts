@@ -41,11 +41,11 @@ Use the buttons below or type commands like /generate`,
 /**
  * Render the drafts list with pagination
  */
-export async function renderDraftsList(env: Env, page = 0): Promise<ViewResult> {
+export async function renderDraftsList(env: Env, chatId: string, page = 0): Promise<ViewResult> {
     const limit = 5;
     const offset = page * limit;
-    const drafts = await getAllDrafts(env, undefined, limit, offset);
-    const total = await countDrafts(env);
+    const drafts = await getAllDrafts(env, chatId, undefined, limit, offset);
+    const total = await countDrafts(env, chatId);
     const totalPages = Math.ceil(total / limit);
 
     if (drafts.length === 0) {
@@ -103,8 +103,8 @@ Page ${page + 1} of ${totalPages}`,
 /**
  * Render a single draft detail
  */
-export async function renderDraftDetail(env: Env, draftId: string): Promise<ViewResult> {
-    const draft = await getDraft(env, draftId);
+export async function renderDraftDetail(env: Env, chatId: string, draftId: string): Promise<ViewResult> {
+    const draft = await getDraft(env, draftId, chatId);
 
     if (!draft) {
         return {
@@ -319,8 +319,8 @@ ${message}`,
 /**
  * Render repos list
  */
-export async function renderReposList(env: Env): Promise<ViewResult> {
-    const repos = await getRepos(env);
+export async function renderReposList(env: Env, chatId: string): Promise<ViewResult> {
+    const repos = await getRepos(env, chatId);
 
     if (repos.length === 0) {
         return {
@@ -376,8 +376,8 @@ Tap a repo to view details or manage settings.`,
 /**
  * Render repo detail view
  */
-export async function renderRepoDetail(env: Env, repoId: string): Promise<ViewResult> {
-    const repo = await getRepo(env, repoId);
+export async function renderRepoDetail(env: Env, chatId: string, repoId: string): Promise<ViewResult> {
+    const repo = await getRepo(env, repoId, chatId);
 
     if (!repo) {
         return renderError('Repository not found.');
@@ -438,8 +438,8 @@ I'll set up a webhook to auto-detect new PRs and commits.`,
 /**
  * Render delete repo confirmation
  */
-export async function renderDeleteRepoConfirm(env: Env, repoId: string): Promise<ViewResult> {
-    const repo = await getRepo(env, repoId);
+export async function renderDeleteRepoConfirm(env: Env, chatId: string, repoId: string): Promise<ViewResult> {
+    const repo = await getRepo(env, repoId, chatId);
 
     if (!repo) {
         return renderError('Repository not found.');
@@ -464,8 +464,8 @@ This will also remove the webhook from GitHub.`,
 /**
  * Render repo config editing view
  */
-export async function renderRepoConfig(env: Env, repoId: string): Promise<ViewResult> {
-    const repo = await getRepo(env, repoId);
+export async function renderRepoConfig(env: Env, chatId: string, repoId: string): Promise<ViewResult> {
+    const repo = await getRepo(env, repoId, chatId);
 
     if (!repo) {
         return renderError('Repository not found.');

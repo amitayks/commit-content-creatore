@@ -1,8 +1,11 @@
 /**
  * Grok Service - AI content and image generation
+ *
+ * SECURITY: Uses secure logging and sanitizes API error responses
  */
 
 import type { Env, PRData, CommitData, ContentSource, DraftContent } from '../types';
+import { logInfo, logError, sanitizeContent, isValidImageContentType, isValidFileSize } from './security';
 
 const GROK_API = 'https://api.x.ai/v1';
 
@@ -54,8 +57,9 @@ Respond ONLY with valid JSON in this format:
     });
 
     if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Grok API error: ${error}`);
+        // SECURITY: Don't expose full API error to prevent info leakage
+        logError('Grok API content generation failed:', response.status);
+        throw new Error('Content generation failed. Please try again.');
     }
 
     const data = await response.json() as {
@@ -141,8 +145,9 @@ Apply this change and return the updated content as JSON.`,
     });
 
     if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Grok API error: ${error}`);
+        // SECURITY: Don't expose full API error to prevent info leakage
+        logError('Grok API edit content failed:', response.status);
+        throw new Error('Content editing failed. Please try again.');
     }
 
     const data = await response.json() as { choices: [{ message: { content: string } }] };
@@ -172,7 +177,8 @@ export async function generateImage(env: Env, content: DraftContent): Promise<st
     try {
         // Use Grok-generated imagePrompt if available, otherwise build from content
         const prompt = content.imagePrompt || buildImagePrompt(content);
-        console.log('Generating image with prompt:', prompt.substring(0, 200));
+        // SECURITY: Only log truncated prompt, no sensitive data
+        logInfo('Generating image with prompt length:', prompt.length);
 
         const response = await fetch(`${GROK_API}/images/generations`, {
             method: 'POST',
@@ -188,11 +194,11 @@ export async function generateImage(env: Env, content: DraftContent): Promise<st
         });
 
         const responseText = await response.text();
-        console.log('Grok image API response status:', response.status);
-        console.log('Grok image API response:', responseText);
+        // SECURITY: Only log status, not full response (may contain URLs/tokens)
+        logInfo('Grok image API response status:', response.status);
 
         if (!response.ok) {
-            console.error('Image generation failed:', responseText);
+            logError('Image generation failed with status:', response.status);
             return null;
         }
 
@@ -201,11 +207,12 @@ export async function generateImage(env: Env, content: DraftContent): Promise<st
         };
 
         const imageUrl = data.data[0]?.url;
-        console.log('Generated image URL:', imageUrl);
+        // SECURITY: Don't log full URL (may be signed/temporary)
+        logInfo('Image generated successfully');
 
         return imageUrl || null;
     } catch (error) {
-        console.error('Image generation error:', error);
+        logError('Image generation error');
         return null;
     }
 }
@@ -223,19 +230,31 @@ export async function generateAndStoreImage(
         // Generate the image
         const imageUrl = await generateImage(env, content);
         if (!imageUrl) {
-            console.log('No image URL returned from generation');
+            logInfo('No image URL returned from generation');
             return null;
         }
 
         // Download the image
         const response = await fetch(imageUrl);
         if (!response.ok) {
-            console.error('Failed to download generated image:', response.status);
+            logError('Failed to download generated image:', response.status);
             return null;
         }
 
         const imageData = await response.arrayBuffer();
         const contentType = response.headers.get('content-type') || 'image/png';
+
+        // SECURITY: Validate image content type
+        if (!isValidImageContentType(contentType)) {
+            logError('Invalid image content type:', contentType);
+            return null;
+        }
+
+        // SECURITY: Validate file size (max 10MB)
+        if (!isValidFileSize(imageData.byteLength)) {
+            logError('Image file too large:', imageData.byteLength);
+            return null;
+        }
 
         // Store in R2
         const key = `drafts/${draftId}/image.png`;
@@ -243,20 +262,24 @@ export async function generateAndStoreImage(
             httpMetadata: { contentType },
         });
 
-        console.log('Image stored in R2:', key);
+        logInfo('Image stored in R2 for draft:', draftId);
         return key;
     } catch (error) {
-        console.error('generateAndStoreImage error:', error);
+        logError('generateAndStoreImage error');
         return null;
     }
 }
 
 /**
  * Ensure a draft has an image - check R2 first, generate if missing
+ * @param env - Environment with bindings
+ * @param chatId - Owner's chat ID for database update
+ * @param draft - Draft object with id, content, and optional image_url
  * @returns The image URL to display, or null if generation failed
  */
 export async function ensureImage(
     env: Env,
+    chatId: string,
     draft: { id: string; content: string; image_url?: string | null }
 ): Promise<string | null> {
     // If draft already has an image key, build the URL
@@ -265,11 +288,11 @@ export async function ensureImage(
         const existing = await env.IMAGES.get(draft.image_url);
         if (existing) {
             // Return worker URL to serve the image
-            console.log('Using existing R2 image:', draft.image_url);
+            logInfo('Using existing R2 image for draft:', draft.id);
             return `/image/${draft.image_url}`;
         }
         // Image key exists but file missing - regenerate
-        console.log('Image key exists but file missing, regenerating...');
+        logInfo('Image key exists but file missing, regenerating for draft:', draft.id);
     }
 
     // Parse content to generate image
@@ -277,12 +300,12 @@ export async function ensureImage(
     try {
         content = JSON.parse(draft.content) as DraftContent;
     } catch {
-        console.error('Failed to parse draft content for image generation');
+        logError('Failed to parse draft content for image generation');
         return null;
     }
 
     // Generate and store
-    console.log('Generating image on-demand for draft:', draft.id);
+    logInfo('Generating image on-demand for draft:', draft.id);
     const imageKey = await generateAndStoreImage(env, content, draft.id);
 
     if (!imageKey) {
@@ -291,9 +314,10 @@ export async function ensureImage(
 
     // Save the image key to the database
     // Import updateDraft dynamically to avoid circular dependency
+    // SECURITY: Pass chatId for ownership verification
     const { updateDraft } = await import('./db');
-    await updateDraft(env, draft.id, { image_url: imageKey });
-    console.log('Saved image key to draft:', imageKey);
+    await updateDraft(env, draft.id, chatId, { image_url: imageKey });
+    logInfo('Saved image key to draft:', draft.id);
 
     // Return the worker URL to serve the image
     return `/image/${imageKey}`;
@@ -301,6 +325,7 @@ export async function ensureImage(
 
 /**
  * Build the prompt for content generation
+ * SECURITY: Sanitizes input content to prevent prompt injection and excessive size
  */
 function buildContentPrompt(source: ContentSource): string {
     const { type, data } = source;
@@ -308,12 +333,17 @@ function buildContentPrompt(source: ContentSource): string {
 
     if (type === 'pr') {
         const pr = data as PRData;
+        // SECURITY: Sanitize content to prevent prompt injection and limit size
+        const safeTitle = sanitizeContent(pr.title, 200);
+        const safeAuthor = sanitizeContent(pr.author, 50);
+        const safeBody = sanitizeContent(pr.body || 'No description provided', 2000);
+
         return `Create a ${isSimple ? 'single tweet' : 'tweet thread (2-5 tweets)'} about this code change:
 
-**PR Title**: ${pr.title}
-**Author**: ${pr.author}
+**PR Title**: ${safeTitle}
+**Author**: ${safeAuthor}
 **Stats**: ${pr.files_changed} files, +${pr.additions} -${pr.deletions} lines
-**Description**: ${pr.body || 'No description provided'}
+**Description**: ${safeBody}
 
 ${isSimple
                 ? 'Keep it concise - this is a small change.'
@@ -322,12 +352,17 @@ ${isSimple
 Remember: JSON format only, each tweet ≤ 280 chars.`;
     } else {
         const commit = data as CommitData;
+        // SECURITY: Sanitize content to prevent prompt injection and limit size
+        const safeTitle = sanitizeContent(commit.title, 200);
+        const safeAuthor = sanitizeContent(commit.author, 50);
+        const safeBody = sanitizeContent(commit.body || 'No additional details', 2000);
+
         return `Create a ${isSimple ? 'single tweet' : 'tweet thread (2-5 tweets)'} about this commit:
 
-**Commit**: ${commit.title}
-**Author**: ${commit.author}
+**Commit**: ${safeTitle}
+**Author**: ${safeAuthor}
 **Stats**: ${commit.files_changed} files, +${commit.additions} -${commit.deletions} lines
-**Details**: ${commit.body || 'No additional details'}
+**Details**: ${safeBody}
 
 ${isSimple
                 ? 'Keep it concise - this is a small change.'

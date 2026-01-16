@@ -1,7 +1,8 @@
 /**
  * Message Handler - Process incoming text messages
- * 
+ *
  * Key pattern: Text messages ALWAYS get a NEW message response
+ * SECURITY: All operations verify ownership via chatId
  */
 
 import type { Env, TelegramMessage, ChatContext, DraftContent, InlineButton } from '../types';
@@ -11,6 +12,7 @@ import { getContentSource, validateRepo } from '../services/github';
 import { generateContent, generateImage, editContent } from '../services/grok';
 import { postThread, uploadMedia } from '../services/x';
 import { createWebhook } from '../services/webhook';
+import { sanitizeError } from '../services/security';
 import {
     renderHome,
     renderDraftsList,
@@ -30,14 +32,14 @@ import {
 
 /**
  * Handle incoming text message
- * 
+ *
  * Text messages ALWAYS result in a NEW message response (conversational flow)
  */
 export async function handleMessage(env: Env, message: TelegramMessage): Promise<void> {
     const chatId = String(message.chat.id);
     const text = message.text?.trim() || '';
 
-    console.log('Processing message:', chatId, text);
+    console.log('Processing message:', chatId, text.substring(0, 50));
 
     try {
         // Get current state
@@ -65,8 +67,8 @@ export async function handleMessage(env: Env, message: TelegramMessage): Promise
             context: null,
         });
     } catch (error) {
-        console.error('Message handler error:', error);
-        const view = renderError(String(error));
+        console.error('Message handler error:', sanitizeError(error));
+        const view = renderError('An error occurred. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
@@ -151,7 +153,7 @@ async function handleCommand(env: Env, chatId: string, text: string): Promise<vo
         }
 
         case '/drafts': {
-            const view = await renderDraftsList(env, 0);
+            const view = await renderDraftsList(env, chatId, 0);
             const messageId = await sendMessage(env, chatId, view.text, view.keyboard);
             await updateChatState(env, chatId, {
                 message_id: messageId,
@@ -203,7 +205,7 @@ async function handleCommand(env: Env, chatId: string, text: string): Promise<vo
         }
 
         case '/repos': {
-            const view = await renderReposList(env);
+            const view = await renderReposList(env, chatId);
             const messageId = await sendMessage(env, chatId, view.text, view.keyboard);
             await updateChatState(env, chatId, {
                 message_id: messageId,
@@ -265,8 +267,8 @@ async function handleGenerateInput(env: Env, chatId: string, sha: string): Promi
         // Generate content
         const content = await generateContent(env, source);
 
-        // Save draft
-        const draftId = await createDraft(env, {
+        // Save draft with ownership
+        const draftId = await createDraft(env, chatId, {
             pr_number: prNumber,
             pr_title: prTitle,
             commit_sha: sha,
@@ -274,7 +276,7 @@ async function handleGenerateInput(env: Env, chatId: string, sha: string): Promi
         });
 
         // Show draft preview
-        const view = await renderDraftDetail(env, draftId);
+        const view = await renderDraftDetail(env, chatId, draftId);
         await sendMessage(env, chatId, view.text, view.keyboard);
         await updateChatState(env, chatId, {
             message_id: messageId,
@@ -282,8 +284,8 @@ async function handleGenerateInput(env: Env, chatId: string, sha: string): Promi
             context: { selected_draft_id: draftId },
         });
     } catch (error) {
-        console.error('Generate error:', error);
-        const view = renderError(String(error));
+        console.error('Generate error:', sanitizeError(error));
+        const view = renderError('Failed to generate content. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
@@ -320,8 +322,8 @@ async function handleScheduleInput(env: Env, chatId: string, input: string): Pro
 
         const content = await generateContent(env, source);
 
-        // Save as scheduled draft
-        await createDraft(env, {
+        // Save as scheduled draft with ownership
+        await createDraft(env, chatId, {
             pr_number: prNumber,
             pr_title: prTitle,
             commit_sha: sha,
@@ -335,7 +337,7 @@ async function handleScheduleInput(env: Env, chatId: string, input: string): Pro
         );
         await sendMessage(env, chatId, view.text, view.keyboard);
     } catch (error) {
-        const view = renderError(String(error));
+        const view = renderError('Failed to schedule. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
@@ -376,10 +378,10 @@ Example: <code>ozkeisar/work-content-tracker</code>`,
     const [owner, repo] = parts;
 
     try {
-        // Check if already exists
-        const existing = await getRepoByOwnerRepo(env, owner, repo);
+        // Check if already exists for this user
+        const existing = await getRepoByOwnerRepo(env, chatId, owner, repo);
         if (existing) {
-            const view = await renderRepoDetail(env, existing.id);
+            const view = await renderRepoDetail(env, chatId, existing.id);
             const messageId = await sendMessage(
                 env,
                 chatId,
@@ -416,8 +418,8 @@ Make sure:
             return;
         }
 
-        // Create the repo first
-        const repoId = await createRepo(env, { owner, repo });
+        // Create the repo with ownership
+        const repoId = await createRepo(env, chatId, { owner, repo });
 
         // Create GitHub webhook
         const workerUrl = 'https://content-bot.keisarcontentcreator.workers.dev';
@@ -426,14 +428,14 @@ Make sure:
         let webhookStatus = '';
         if (webhookId) {
             // Update repo with webhook ID
-            await updateRepo(env, repoId, { webhook_id: webhookId });
+            await updateRepo(env, repoId, chatId, { webhook_id: webhookId });
             webhookStatus = '\n\n✅ Webhook created successfully!';
         } else {
             webhookStatus = '\n\n⚠️ Webhook creation failed. Auto-detection may not work.\nCheck that your GITHUB_TOKEN has admin:repo_hook scope.';
         }
 
         // Show success with repo detail
-        const view = await renderRepoDetail(env, repoId);
+        const view = await renderRepoDetail(env, chatId, repoId);
         const messageId = await sendMessage(
             env,
             chatId,
@@ -450,8 +452,8 @@ ${view.text}`,
             context: { selected_repo_id: repoId },
         });
     } catch (error) {
-        console.error('Error adding repo:', error);
-        const view = renderError(`Failed to add repository: ${String(error)}`);
+        console.error('Error adding repo:', sanitizeError(error));
+        const view = renderError('Failed to add repository. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
@@ -461,7 +463,7 @@ ${view.text}`,
  */
 async function handlePublishApproved(env: Env, chatId: string): Promise<void> {
     try {
-        const drafts = await getAllDrafts(env, 'approved');
+        const drafts = await getAllDrafts(env, chatId, 'approved');
 
         if (drafts.length === 0) {
             const view = renderError('No approved drafts to publish.\n\nApprove some drafts first!');
@@ -489,19 +491,19 @@ async function handlePublishApproved(env: Env, chatId: string): Promise<void> {
                 // Post thread
                 const { url } = await postThread(env, content, mediaId);
 
-                // Update status
-                await updateDraftStatus(env, draft.id, 'published');
+                // Update status with ownership verification
+                await updateDraftStatus(env, draft.id, chatId, 'published');
 
                 results.push(`✅ PR #${draft.pr_number}: ${url}`);
             } catch (error) {
-                results.push(`❌ PR #${draft.pr_number}: ${String(error)}`);
+                results.push(`❌ PR #${draft.pr_number}: Publishing failed`);
             }
         }
 
         const view = renderSuccess(`Published ${drafts.length} drafts:\n\n${results.join('\n')}`);
         await sendMessage(env, chatId, view.text, view.keyboard);
     } catch (error) {
-        const view = renderError(String(error));
+        const view = renderError('Failed to publish. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
@@ -526,8 +528,8 @@ async function handleEditDraftInput(
     }
 
     try {
-        // Get the draft
-        const draft = await getDraft(env, draftId);
+        // Get the draft with ownership check
+        const draft = await getDraft(env, draftId, chatId);
         if (!draft) {
             const view = renderError('Draft not found.');
             await sendMessage(env, chatId, view.text, view.keyboard);
@@ -547,8 +549,8 @@ async function handleEditDraftInput(
         // Call editContent to refine via Grok
         const refinedContent = await editContent(env, currentContent, instruction);
 
-        // Update the draft with new content
-        await updateDraftContent(env, draftId, JSON.stringify(refinedContent));
+        // Update the draft with new content (with ownership verification)
+        await updateDraftContent(env, draftId, chatId, JSON.stringify(refinedContent));
 
         // Edit the message with success
         await editMessage(env, chatId, messageId,
@@ -556,9 +558,8 @@ async function handleEditDraftInput(
             [[{ text: '👀 View Draft', callback_data: `draft:${draftId}` }]]
         );
     } catch (error) {
-        console.error('Edit draft error:', error);
-        const view = renderError(`Failed to edit draft: ${String(error)}`);
+        console.error('Edit draft error:', sanitizeError(error));
+        const view = renderError('Failed to edit draft. Please try again.');
         await sendMessage(env, chatId, view.text, view.keyboard);
     }
 }
-
