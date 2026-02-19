@@ -1,0 +1,22 @@
+node_modules/
+dist/
+.env
+*.log
+logs/
+
+# Data files (tracked separately)
+# data/drafts/*.json
+# data/published/*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Wrangler local dev state
+.wrangler/

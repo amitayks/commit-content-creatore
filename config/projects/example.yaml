@@ -1,0 +1,54 @@
+# Example project configuration
+
+project:
+  id: my-project
+  name: My Awesome Project
+  repository: username/repo-name
+
+triggers:
+  branches:
+    - main
+    - release/*
+  events:
+    - pr_merged
+    - push
+  filePatterns:
+    include:
+      - src/**
+      - "*.ts"
+      - "*.tsx"
+    exclude:
+      - "**/*.test.*"
+      - "**/*.spec.*"
+      - node_modules/**
+
+content:
+  types:
+    - technical
+    - feature
+    - learning
+  tone: professional-casual
+  # Custom prompt addition (optional):
+  # customPrompt: "Focus on React patterns and TypeScript tips"
+
+formatting:
+  hashtags:
+    always:
+      - "#DevLife"
+      - "#OpenSource"
+    project:
+      - "#MyProject"
+  emojis: true
+
+thread:
+  minCommitsForThread: 3
+  maxTweets: 10
+  alwaysGenerateImage: true
+  singleTweetImageProbability: 0.7
+
+debounce:
+  pushDebounceMinutes: 30
+  prImmediate: true
+
+platforms:
+  x: true

@@ -1,0 +1,43 @@
+name = "content-bot"
+main = "src/index.ts"
+compatibility_date = "2024-12-18"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "content-bot-db"
+database_id = "4bd535da-8924-4bf2-bb50-19d25f483236"
+
+# R2 Storage binding
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "content-bot-images"
+
+# Cron triggers for scheduled publishing
+[triggers]
+crons = ["*/15 * * * *"]  # Every 15 minutes
+
+# ===========================================
+# SECRETS CONFIGURATION (set via wrangler secret put)
+# ===========================================
+# Shared infrastructure secrets (required):
+#   - TELEGRAM_BOT_TOKEN: Telegram bot token from @BotFather
+#   - TELEGRAM_CHAT_ID: Admin's Telegram user ID (copied to ADMIN_CHAT_ID at runtime)
+#   - ENCRYPTION_KEY: 32-byte base64 key for AES-256-GCM user key encryption
+#                     Generate with: openssl rand -base64 32
+#   - ADMIN_SECRET: Secret for protecting /setup and /migrate endpoints
+#                   Generate with: openssl rand -hex 32
+#   - WORKER_URL: Full URL of this worker (e.g., https://content-bot.your-subdomain.workers.dev)
+#                 Required for cron fan-out and webhook URL creation
+#
+# Optional:
+#   - MAX_USERS: Max registered users (default: 50)
+#
+# REMOVED (no longer needed — per-user webhook secrets stored in D1):
+#   - GITHUB_OWNER (was: GitHub org/user for commit search)
+#   - GITHUB_WEBHOOK_SECRET (was: shared webhook signing secret)
+#
+# NOTE: Per-user API keys (X, Gemini, GitHub, HeyGen) are stored
+# encrypted in D1, NOT as Worker secrets. Users provide keys via
+# the onboarding flow or Settings > API Keys.
+# GitHub webhook secrets are auto-generated per repo and stored in the repos table.

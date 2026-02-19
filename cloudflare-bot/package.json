@@ -1,0 +1,17 @@
+{
+  "name": "cloudflare-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for content generation and X publishing",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail --format pretty",
+    "db:migrate": "wrangler d1 execute content-bot-db --remote --file=schema.sql"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260210.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.0.0"
+  }
+}
