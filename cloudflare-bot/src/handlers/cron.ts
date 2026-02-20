@@ -1,9 +1,9 @@
 /**
  * Cron Handler — Coordinator + Per-User Cron Functions
  *
- * The coordinator finds users with pending work and dispatches per-user
- * cron tasks via self-fetch fan-out to /internal/user-cron.
- * Each per-user function runs with an already-hydrated env.
+ * The coordinator finds users with pending work and runs per-user
+ * cron tasks inline as parallel promises (no self-fetch fan-out).
+ * Each per-user function runs with a hydrated env.
  */
 
 import type { Env, Draft, VideoDraft } from '../types';
@@ -20,20 +20,17 @@ import { sendMessage, sendVideo } from '../services/telegram';
 import { publishDraft } from '../core/publish';
 import { sanitizeError, logInfo, logError } from '../services/security';
 import { formatLocalTime } from '../services/timezone';
+import { hydrateEnv } from '../services/user-keys';
+import { pollUserAccounts } from '../services/poller';
 
 // ==================== COORDINATOR ====================
 
 /**
- * Smart coordinator — finds active users with pending work and dispatches fan-out
+ * Coordinator — finds active users with pending work and runs cron tasks inline in parallel
  */
 export async function cronCoordinator(env: Env, ctx: ExecutionContext): Promise<void> {
     logInfo('[cron] Coordinator starting');
 
-    // Find users with pending work:
-    // - watching twitter accounts (need polling)
-    // - due scheduled drafts
-    // - stale generating videos
-    // - scheduled videos ready to publish
     const result = await env.DB.prepare(`
         SELECT DISTINCT chat_id FROM (
             SELECT chat_id FROM twitter_accounts WHERE is_watching = 1
@@ -53,29 +50,68 @@ export async function cronCoordinator(env: Env, ctx: ExecutionContext): Promise<
         return;
     }
 
-    logInfo(`[cron] Dispatching fan-out for ${users.length} users`);
+    logInfo(`[cron] Processing ${users.length} users inline`);
 
-    if (!env.WORKER_URL) {
-        logError('[cron] WORKER_URL not configured — cannot fan out');
-        return;
-    }
-
-    // Fan out: dispatch one self-fetch per user
-    const dispatches = users.map(user =>
-        fetch(`${env.WORKER_URL}/internal/user-cron`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Admin-Secret': env.ADMIN_SECRET || '',
-            },
-            body: JSON.stringify({ chatId: user.chat_id }),
-        }).catch(err => {
-            logError(`[cron] Fan-out failed for chat ${user.chat_id}:`, err instanceof Error ? err.message : String(err));
-        })
+    // Run all users in parallel — no self-fetch, direct execution
+    const results = await Promise.allSettled(
+        users.map(user => processUserCron(env, user.chat_id))
     );
 
-    ctx.waitUntil(Promise.allSettled(dispatches));
-    logInfo(`[cron] Dispatched ${dispatches.length} fan-out requests`);
+    // Log results
+    for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        const chatId = users[i].chat_id;
+        if (r.status === 'rejected') {
+            logError(`[cron] User ${chatId} failed:`, r.reason instanceof Error ? r.reason.message : String(r.reason));
+        }
+    }
+
+    logInfo(`[cron] Completed ${users.length} users`);
+}
+
+/**
+ * Run all cron tasks for a single user — hydrates env, polls, publishes, etc.
+ */
+async function processUserCron(env: Env, chatId: string): Promise<void> {
+    logInfo(`[cron] Starting per-user cron for chat ${chatId}`);
+
+    const userEnv = await hydrateEnv(env, chatId);
+
+    const results: Record<string, string> = {};
+
+    try {
+        await pollUserAccounts(userEnv, chatId);
+        results.poller = 'ok';
+    } catch (error) {
+        logError(`[cron] Poller failed for chat ${chatId}:`, sanitizeError(error));
+        results.poller = 'error';
+    }
+
+    try {
+        await publishUserDrafts(userEnv, chatId);
+        results.drafts = 'ok';
+    } catch (error) {
+        logError(`[cron] Draft publishing failed for chat ${chatId}:`, sanitizeError(error));
+        results.drafts = 'error';
+    }
+
+    try {
+        await checkUserStaleVideos(userEnv, chatId);
+        results.staleVideos = 'ok';
+    } catch (error) {
+        logError(`[cron] Stale video check failed for chat ${chatId}:`, sanitizeError(error));
+        results.staleVideos = 'error';
+    }
+
+    try {
+        await publishUserScheduledVideos(userEnv, chatId);
+        results.scheduledVideos = 'ok';
+    } catch (error) {
+        logError(`[cron] Scheduled video publishing failed for chat ${chatId}:`, sanitizeError(error));
+        results.scheduledVideos = 'error';
+    }
+
+    logInfo(`[cron] Completed for chat ${chatId}:`, JSON.stringify(results));
 }
 
 // ==================== PER-USER CRON FUNCTIONS ====================

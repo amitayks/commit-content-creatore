@@ -53,7 +53,6 @@ export async function bootstrapPersona(env: Env, accountId: string, chatId: stri
                     parts: [{ text: PERSONA_SYSTEM_PROMPT }],
                 },
                 generationConfig: {
-                    responseMimeType: 'application/json',
                     temperature: 0.5,
                 },
                 tools: [{
@@ -74,13 +73,23 @@ export async function bootstrapPersona(env: Env, accountId: string, chatId: stri
             }>;
         };
 
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!text) {
+        // With googleSearch enabled, response may have multiple parts (text + search grounding)
+        // Find the first text part and extract JSON from it
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        const textPart = parts.find(p => p.text)?.text;
+        if (!textPart) {
             console.error('[persona] No response text from Gemini');
             return false;
         }
 
-        const result = JSON.parse(text) as PersonaResult;
+        // Extract JSON from freeform response (may be wrapped in ```json blocks)
+        const jsonMatch = textPart.match(/```json\s*([\s\S]*?)```/) || textPart.match(/(\{[\s\S]*\})/);
+        if (!jsonMatch) {
+            console.error('[persona] Could not extract JSON from Gemini response:', textPart.substring(0, 200));
+            return false;
+        }
+
+        const result = JSON.parse(jsonMatch[1]) as PersonaResult;
 
         // Store the persona overview
         await upsertTwitterAccountOverview(env, accountId, {

@@ -27,7 +27,7 @@ import { handleTestGenerate } from './routes/test-generate';
 import { handleImageRequest } from './routes/image';
 import { handleHeyGenWebhook } from './routes/heygen-webhook';
 import { handleMediaRequest } from './routes/media';
-import { handleInternalCron } from './routes/internal-cron';
+
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -93,13 +93,6 @@ export default {
                 if (!rateLimit.allowed) return rateLimitResponse(rateLimit.resetAt, RATE_LIMITS.image.maxRequests);
                 const response = await handleImageRequest(url, env);
                 return addRateLimitHeaders(response, rateLimit.remaining, rateLimit.resetAt, RATE_LIMITS.image.maxRequests);
-            }
-
-            if (url.pathname === '/internal/user-cron' && request.method === 'POST') {
-                const rateLimit = checkRateLimit(`admin:${clientIP}`, RATE_LIMITS.admin);
-                if (!rateLimit.allowed) return rateLimitResponse(rateLimit.resetAt, RATE_LIMITS.admin.maxRequests);
-                const response = await handleInternalCron(request, env);
-                return addRateLimitHeaders(response, rateLimit.remaining, rateLimit.resetAt, RATE_LIMITS.admin.maxRequests);
             }
 
             if (url.pathname === '/test-generate' && request.method === 'GET') {

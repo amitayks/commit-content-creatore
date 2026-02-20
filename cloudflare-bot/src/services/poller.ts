@@ -12,7 +12,7 @@
  */
 
 import type { Env, TwitterAccount, TwitterAccountConfig, TwitterTweet, ThreadBufferEntry } from '../types';
-import { getUserTweets, searchConversation, getMediaUrl, type XTweet } from './x';
+import { getUserTweets, searchConversation, getMediaUrl, lookupUserByUsername, type XTweet } from './x';
 import {
     getWatchingTwitterAccountsByUser,
     updateTwitterAccount,
@@ -45,8 +45,21 @@ export async function pollUserAccounts(env: Env, chatId: string): Promise<void> 
             const config = parseTwitterAccountConfig(account);
 
             if (!account.user_id) {
-                console.log(`[poller] Skipping @${account.username} — no user_id (needs bootstrap)`);
-                continue;
+                // Auto-resolve missing user_id via X API lookup
+                try {
+                    const user = await lookupUserByUsername(env, account.username);
+                    if (user) {
+                        await updateTwitterAccount(env, account.id, account.chat_id, { user_id: user.id });
+                        account.user_id = user.id;
+                        console.log(`[poller] Resolved user_id for @${account.username}: ${user.id}`);
+                    } else {
+                        console.log(`[poller] Skipping @${account.username} — user not found on X`);
+                        continue;
+                    }
+                } catch (error) {
+                    console.log(`[poller] Skipping @${account.username} — user_id lookup failed:`, error instanceof Error ? error.message : String(error));
+                    continue;
+                }
             }
 
             // Poll for new tweets

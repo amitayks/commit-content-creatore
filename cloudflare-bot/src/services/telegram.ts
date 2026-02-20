@@ -53,7 +53,8 @@ export async function sendMessage(
     env: Env,
     chatId: string | number,
     text: string,
-    keyboard?: InlineButton[][]
+    keyboard?: InlineButton[][],
+    options?: { disableLinkPreview?: boolean }
 ): Promise<number> {
     const response = await fetch(`${TELEGRAM_API}${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
         method: 'POST',
@@ -63,6 +64,7 @@ export async function sendMessage(
             text,
             parse_mode: 'HTML',
             reply_markup: keyboard ? { inline_keyboard: toTelegramKeyboard(keyboard) } : undefined,
+            link_preview_options: options?.disableLinkPreview ? { is_disabled: true } : undefined,
         }),
     });
 
@@ -85,7 +87,8 @@ export async function editMessage(
     chatId: string | number,
     messageId: number,
     text: string,
-    keyboard?: InlineButton[][]
+    keyboard?: InlineButton[][],
+    options?: { disableLinkPreview?: boolean }
 ): Promise<void> {
     const response = await fetch(`${TELEGRAM_API}${env.TELEGRAM_BOT_TOKEN}/editMessageText`, {
         method: 'POST',
@@ -96,6 +99,7 @@ export async function editMessage(
             text,
             parse_mode: 'HTML',
             reply_markup: keyboard ? { inline_keyboard: toTelegramKeyboard(keyboard) } : undefined,
+            link_preview_options: options?.disableLinkPreview ? { is_disabled: true } : undefined,
         }),
     });
 

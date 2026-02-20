@@ -5,6 +5,7 @@
 import type { HandlerContext } from '../core/router';
 import type { ViewResult } from '../types';
 import { updateChatState, getTwitterAccount, updateTwitterAccount, deleteTwitterAccount } from '../services/db';
+import { editMessage } from '../services/telegram';
 import { renderAccountDetail, renderAddAccount, renderDeleteAccountConfirm, renderAccountsList } from '../views/accounts';
 import { renderError } from '../views';
 
@@ -61,6 +62,13 @@ export async function bootstrapAction(ctx: HandlerContext & { extra?: string }):
     if (!account) {
         return renderError('Account not found.');
     }
+
+    // Show loading state immediately
+    await editMessage(
+        ctx.env, ctx.chatId, ctx.messageId!,
+        `🔄 <b>Analyzing @${account.username}...</b>\n\nSearching the web and building a persona profile. This may take a moment.`,
+        [],
+    );
 
     try {
         const { bootstrapPersona } = await import('../services/persona-bootstrap');

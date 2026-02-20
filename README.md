@@ -56,7 +56,7 @@ Have an idea? Write it yourself. Muse gives you a live compose mode with charact
 
 Queue content for the perfect moment. Visual date picker (next 30 days) and hour/minute selector, all respecting your configured timezone.
 
-- **Hourly cron**: Muse checks every hour and publishes anything that's due
+- **15-minute cron**: Muse checks every 15 minutes and publishes anything that's due
 - **Failure recovery**: If a publish fails, the draft goes back to draft status for retry
 - **Dashboard preview**: Home screen shows your next scheduled post at a glance
 
@@ -72,40 +72,50 @@ Turn your commits into narrated video updates with AI-generated avatars. Script 
 
 > Video generation is currently powered by HeyGen and will be transitioning to Seedance 2.0 for a fully integrated experience.
 
+### 👥 Multi-Tenant — Bring Your Own Keys
+
+Muse supports multiple users on a single bot instance. Each user goes through a guided onboarding flow and provides their own API keys, which are encrypted at rest with AES-256-GCM.
+
+- **Guided onboarding**: Step-by-step setup for Gemini, X/Twitter, and GitHub keys
+- **Per-user encryption**: All API keys are encrypted individually per user in D1
+- **Settings UI**: Manage and update keys anytime via Settings > API Keys
+- **Optional integrations**: HeyGen and Instagram keys can be added later
+- **Isolated data**: Each user's repos, drafts, accounts, and videos are scoped to their chat ID
+
 ---
 
 ## How It Works
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│                          YOUR WORKFLOW                                │
-│                                                                      │
-│   GitHub Push/PR ──┐                                                 │
-│                    ▼                                                  │
-│              ┌───────────┐    ┌───────────┐    ┌──────────────┐     │
-│              │ Cloudflare │───▶│  Gemini   │───▶│   Telegram   │     │
-│              │  Worker    │    │    AI     │    │  Dashboard   │     │
-│              │ (content-  │    │ (content  │    │  (review,    │     │
-│              │   bot)     │    │ + images) │    │  approve,    │     │
-│              └───────────┘    └───────────┘    │  schedule)   │     │
-│                    ▲                           └──────┬───────┘     │
-│   X Account ──────┘                                  │              │
-│   Tweets      ▲                                      ▼              │
-│               │           ┌───────────┐    ┌──────────────┐        │
-│               └───────────│  Poller   │    │   X/Twitter  │        │
-│                           │  Worker   │    │   Published! │        │
-│                           │ (every    │    └──────────────┘        │
-│                           │  15 min)  │                             │
-│                           └───────────┘                             │
-└──────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────┐
+│                          YOUR WORKFLOW                             │
+│                                                                   │
+│   GitHub Push/PR ──┐                                              │
+│                    ▼                                               │
+│              ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│              │ Cloudflare │───▶│  Gemini   │───▶│   Telegram   │  │
+│              │  Worker    │    │    AI     │    │  Dashboard   │  │
+│              │ (content-  │    │ (content  │    │  (review,    │  │
+│              │   bot)     │    │ + images) │    │  approve,    │  │
+│              └─────┬─────┘    └───────────┘    │  schedule)   │  │
+│                    │                           └──────┬───────┘  │
+│   X Account ───────┤  Cron: every 15 min              │          │
+│   Tweets           │  • Poll followed accounts        ▼          │
+│                    │  • Score with AI          ┌──────────────┐  │
+│                    │  • Send notifications     │   X/Twitter  │  │
+│                    │  • Publish scheduled       │   Published! │  │
+│                    │  • Check stale videos     └──────────────┘  │
+│                    │                                              │
+│   User Keys ───────┘  Per-user encrypted in D1                   │
+└───────────────────────────────────────────────────────────────────┘
 ```
 
-Muse runs as **two Cloudflare Workers** sharing a single D1 database:
+Muse runs as a **single Cloudflare Worker** (`content-bot`) with a `*/15 * * * *` cron trigger:
 
-| Worker | Role | Schedule |
-|--------|------|----------|
-| **content-bot** | Handles all Telegram interactions, GitHub webhooks, content generation, publishing, scheduling, video studio | Hourly cron (publish scheduled posts) |
-| **twitter-poller** | Polls followed X accounts, scores tweets, sends batch notifications, auto-approves | Every 15 minutes |
+| Component | What it does |
+|-----------|-------------|
+| **HTTP routes** | Telegram webhook, GitHub webhook, HeyGen webhook, media serving, setup, migrations |
+| **Cron (every 15 min)** | Polls X accounts, scores tweets, publishes scheduled drafts, checks stale videos, publishes scheduled videos — all users processed in parallel via `Promise.allSettled` |
 
 **Zero dependencies at runtime.** Pure Cloudflare Workers API — no npm packages needed in production. TypeScript compiled to ES modules.
 
@@ -127,6 +137,7 @@ Muse runs as **two Cloudflare Workers** sharing a single D1 database:
 | Persona analysis | AI profiles for followed accounts |
 | Auto-approve | Hands-free mode for high-scoring tweets |
 | Video Studio | AI avatar videos from commit history |
+| Multi-tenant | Multiple users, per-user encrypted API keys |
 | Multi-language | English and Hebrew support |
 | Per-entity config | Different settings per repo and per account |
 
@@ -138,10 +149,13 @@ Before you start, you'll need:
 
 - **Cloudflare account** — [Sign up free](https://dash.cloudflare.com/sign-up) (Workers free tier: 100K requests/day)
 - **Telegram bot** — Create one via [@BotFather](https://t.me/BotFather) and get the token
+- **Node.js 18+** and **npm** (for deployment tooling)
+
+Each user provides their own API keys during onboarding:
+
 - **Google Gemini API key** — [Get one here](https://aistudio.google.com/apikey)
 - **X/Twitter API credentials** — Apply at the [Developer Portal](https://developer.x.com/) (OAuth 1.0a with read+write)
 - **GitHub personal access token** — [Create one](https://github.com/settings/tokens) with `repo` scope
-- **Node.js 18+** and **npm** (for deployment tooling)
 - *(Optional)* **HeyGen API key** — For Video Studio ([heygen.com](https://heygen.com))
 - *(Optional)* **Instagram Business Account** — For video publishing to Instagram
 
@@ -152,19 +166,14 @@ Before you start, you'll need:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/commit-content-creatore.git
-cd commit-content-creatore
+git clone https://github.com/ozkeisar/MusePostBot.git
+cd MusePostBot
 ```
 
 ### 2. Install Dependencies
 
 ```bash
-# Content bot (main worker)
 cd cloudflare-bot
-npm install
-
-# Twitter poller (background worker)
-cd ../twitter-poller
 npm install
 ```
 
@@ -182,16 +191,15 @@ Take note of the **database ID** returned by the D1 create command.
 
 ### 4. Configure Wrangler
 
-Update both `wrangler.toml` files with your database ID:
+Update `cloudflare-bot/wrangler.toml` with your database ID:
 
-**`cloudflare-bot/wrangler.toml`**
 ```toml
 name = "content-bot"
 main = "src/index.ts"
-compatibility_date = "2024-12-02"
+compatibility_date = "2024-12-18"
 
 [triggers]
-crons = ["0 * * * *"]
+crons = ["*/15 * * * *"]  # Every 15 minutes
 
 [[d1_databases]]
 binding = "DB"
@@ -203,138 +211,88 @@ binding = "IMAGES"
 bucket_name = "content-bot-images"
 ```
 
-**`twitter-poller/wrangler.toml`**
-```toml
-name = "twitter-poller"
-main = "src/index.ts"
-compatibility_date = "2024-12-02"
-
-[triggers]
-crons = ["*/15 * * * *"]
-
-[[d1_databases]]
-binding = "DB"
-database_name = "content-bot-db"
-database_id = "YOUR_DATABASE_ID_HERE"
-```
-
 ### 5. Set Secrets
 
-Set secrets for both workers. Run each command from the respective worker directory:
+Only infrastructure secrets are set as Worker secrets. Per-user API keys (X, Gemini, GitHub, etc.) are provided by each user during onboarding and stored encrypted in D1.
 
 ```bash
-# === content-bot secrets ===
 cd cloudflare-bot
 
+# Required
 npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_CHAT_ID
-npx wrangler secret put GITHUB_TOKEN
-npx wrangler secret put GITHUB_WEBHOOK_SECRET
-npx wrangler secret put GOOGLE_API_KEY
-npx wrangler secret put X_API_KEY
-npx wrangler secret put X_API_SECRET
-npx wrangler secret put X_ACCESS_TOKEN
-npx wrangler secret put X_ACCESS_SECRET
-npx wrangler secret put ADMIN_SECRET
+npx wrangler secret put TELEGRAM_CHAT_ID      # Admin's Telegram user ID
+npx wrangler secret put ENCRYPTION_KEY         # openssl rand -base64 32
+npx wrangler secret put ADMIN_SECRET           # openssl rand -hex 32
+npx wrangler secret put WORKER_URL             # https://content-bot.YOUR_SUBDOMAIN.workers.dev
 
-# Optional (for Video Studio)
-npx wrangler secret put HEYGEN_API_KEY
-
-# Optional (for Instagram video publishing)
-npx wrangler secret put INSTAGRAM_ACCESS_TOKEN
-npx wrangler secret put INSTAGRAM_BUSINESS_ACCOUNT_ID
-```
-
-```bash
-# === twitter-poller secrets ===
-cd twitter-poller
-
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_CHAT_ID
-npx wrangler secret put GOOGLE_API_KEY
-npx wrangler secret put X_API_KEY
-npx wrangler secret put X_API_SECRET
-npx wrangler secret put X_ACCESS_TOKEN
-npx wrangler secret put X_ACCESS_SECRET
+# Optional
+npx wrangler secret put MAX_USERS              # Default: 50
 ```
 
 > **Finding your Telegram Chat ID:** Send any message to your bot, then visit `https://api.telegram.org/bot<YOUR_TOKEN>/getUpdates` — your chat ID will be in the response.
 
-### 6. Run Migrations
+### 6. Deploy
 
 ```bash
 cd cloudflare-bot
-
-# Apply schema
-npx wrangler d1 execute content-bot-db --remote --file=schema.sql
-
-# Apply migrations
-npx wrangler d1 execute content-bot-db --remote --file=migrations/001_twitter_repost.sql
-npx wrangler d1 execute content-bot-db --remote --file=migrations/002_persona_cache.sql
-npx wrangler d1 execute content-bot-db --remote --file=migrations/003_tweet_media_url.sql
-```
-
-### 7. Deploy Both Workers
-
-```bash
-# Deploy content bot
-cd cloudflare-bot
-npx wrangler deploy
-
-# Deploy twitter poller
-cd ../twitter-poller
 npx wrangler deploy
 ```
 
-### 8. Register Telegram Webhook
+### 7. Initialize the Bot
 
-After deploying, register the webhook so Telegram sends updates to your worker:
-
-```bash
-curl -X POST "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook" \
-  -H "Content-Type: application/json" \
-  -d '{"url": "https://content-bot.YOUR_SUBDOMAIN.workers.dev/webhook"}'
-```
-
-### 9. Initialize the Bot
-
-Hit the setup endpoint to create database tables and register bot commands:
+Hit the setup endpoint to register the Telegram webhook and bot commands:
 
 ```bash
 curl "https://content-bot.YOUR_SUBDOMAIN.workers.dev/setup?secret=YOUR_ADMIN_SECRET"
 ```
 
-### 10. Set Up GitHub Webhook *(for auto-generate)*
+### 8. Run Migrations
+
+```bash
+curl "https://content-bot.YOUR_SUBDOMAIN.workers.dev/migrate?secret=YOUR_ADMIN_SECRET"
+```
+
+### 9. Set Up GitHub Webhooks
+
+GitHub webhooks are configured **per-user per-repo** through the Telegram dashboard. When a user adds a repo via `/watch owner/repo`, Muse auto-generates a unique webhook secret and provides setup instructions. Each repo has its own webhook secret stored in D1.
 
 In your GitHub repository settings:
 
 1. Go to **Settings > Webhooks > Add webhook**
 2. **Payload URL:** `https://content-bot.YOUR_SUBDOMAIN.workers.dev/github-webhook`
 3. **Content type:** `application/json`
-4. **Secret:** Same value as `GITHUB_WEBHOOK_SECRET`
+4. **Secret:** The secret shown by the bot when you added the repo
 5. **Events:** Select "Pull requests" and "Pushes"
 
 ---
 
 ## Configuration
 
-### Environment Variables Reference
+### Worker Secrets Reference
 
-| Secret | Worker(s) | Required | Description |
-|--------|-----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | Both | Yes | Bot token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Both | Yes | Your Telegram user ID |
-| `GOOGLE_API_KEY` | Both | Yes | Gemini API key |
-| `X_API_KEY` | Both | Yes | X/Twitter OAuth consumer key |
-| `X_API_SECRET` | Both | Yes | X/Twitter OAuth consumer secret |
-| `X_ACCESS_TOKEN` | Both | Yes | X/Twitter OAuth access token |
-| `X_ACCESS_SECRET` | Both | Yes | X/Twitter OAuth access token secret |
-| `GITHUB_TOKEN` | content-bot | Yes | GitHub PAT with repo scope |
-| `GITHUB_WEBHOOK_SECRET` | content-bot | Yes | HMAC secret for webhook verification |
-| `ADMIN_SECRET` | content-bot | Recommended | Protects `/setup` and `/migrate` endpoints |
-| `HEYGEN_API_KEY` | content-bot | No | HeyGen API key (Video Studio) |
-| `INSTAGRAM_ACCESS_TOKEN` | content-bot | No | Instagram Graph API token |
-| `INSTAGRAM_BUSINESS_ACCOUNT_ID` | content-bot | No | Instagram business account ID |
+These are the only secrets stored as Cloudflare Worker secrets. All per-user API keys are encrypted in D1.
+
+| Secret | Required | Description |
+|--------|----------|-------------|
+| `TELEGRAM_BOT_TOKEN` | Yes | Bot token from @BotFather |
+| `TELEGRAM_CHAT_ID` | Yes | Admin's Telegram user ID |
+| `ENCRYPTION_KEY` | Yes | 32-byte base64 key for AES-256-GCM encryption (`openssl rand -base64 32`) |
+| `ADMIN_SECRET` | Yes | Protects `/setup` and `/migrate` endpoints |
+| `WORKER_URL` | Yes | Full URL of this worker (e.g., `https://content-bot.your-subdomain.workers.dev`) |
+| `MAX_USERS` | No | Maximum registered users (default: 50) |
+
+### Per-User API Keys (stored encrypted in D1)
+
+Each user provides these through the onboarding flow or Settings > API Keys:
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| Gemini API key | Yes | Google Gemini for AI content + image generation |
+| X API key + secret | Yes | X/Twitter OAuth 1.0a consumer credentials |
+| X access token + secret | Yes | X/Twitter OAuth 1.0a access credentials |
+| GitHub token | No | PAT with `repo` scope (for auto-generate from commits) |
+| HeyGen API key | No | For Video Studio |
+| Instagram token + account ID | No | For video publishing to Instagram |
 
 ### Repository Settings
 
@@ -392,46 +350,56 @@ Each followed X account has independent configuration:
 ## Architecture
 
 ```
-commit-content-creatore/
-├── cloudflare-bot/                # Main Telegram bot worker
+MusePostBot/
+├── cloudflare-bot/                # Single Cloudflare Worker
 │   ├── src/
-│   │   ├── index.ts               # HTTP router + cron handler
+│   │   ├── index.ts               # HTTP router + cron entry point
+│   │   ├── types.ts               # Shared type definitions
 │   │   ├── core/
 │   │   │   ├── router.ts          # Command/callback/input dispatcher
 │   │   │   ├── publish.ts         # Tweet/thread/quote-tweet publisher
 │   │   │   └── respond.ts         # Telegram response helper
 │   │   ├── commands/              # /slash command handlers
-│   │   ├── actions/               # Callback button handlers (65+)
+│   │   ├── handlers/
+│   │   │   ├── cron.ts            # Cron coordinator + per-user cron tasks
+│   │   │   ├── callback.ts        # Telegram callback query handler
+│   │   │   ├── message.ts         # Telegram message handler
+│   │   │   └── github-webhook.ts  # GitHub webhook processing
+│   │   ├── actions/               # Callback button handlers
 │   │   ├── inputs/                # Text input state handlers
+│   │   ├── views/                 # Telegram UI templates
+│   │   │   ├── home.ts            # Dashboard home screen
+│   │   │   ├── onboarding.ts      # New user onboarding flow
+│   │   │   ├── settings.ts        # API keys & settings UI
+│   │   │   └── ...                # Drafts, repos, accounts, video views
 │   │   ├── services/
 │   │   │   ├── gemini.ts          # AI content + image generation
 │   │   │   ├── x.ts              # X/Twitter API (OAuth 1.0a)
 │   │   │   ├── github.ts         # GitHub API
 │   │   │   ├── telegram.ts       # Telegram Bot API
 │   │   │   ├── heygen.ts         # HeyGen video API
-│   │   │   ├── db.ts             # D1 database operations (50+ functions)
-│   │   │   ├── storage.ts        # R2 image storage
+│   │   │   ├── db.ts             # D1 database operations
+│   │   │   ├── user-db.ts        # User/multi-tenant DB operations
+│   │   │   ├── user-keys.ts      # Per-user key decryption & env hydration
+│   │   │   ├── crypto.ts         # AES-256-GCM encryption/decryption
+│   │   │   ├── poller.ts         # Twitter polling pipeline
+│   │   │   ├── scoring.ts        # AI relevance scoring
+│   │   │   ├── batch-notification.ts # Telegram batch notification cards
+│   │   │   ├── auto-approve.ts   # Auto-generate + approve
+│   │   │   ├── storage.ts        # R2 image/video storage
+│   │   │   ├── video-publish.ts  # Multi-platform video publishing
 │   │   │   ├── repost-generate.ts # Repost content generation
 │   │   │   ├── persona-*.ts      # Persona analysis & caching
-│   │   │   └── security.ts       # Rate limiting, validation
-│   │   ├── views/                 # Telegram UI templates
-│   │   └── types.ts               # Shared type definitions
+│   │   │   └── security.ts       # Rate limiting, validation, headers
+│   │   └── routes/                # HTTP route handlers
+│   │       ├── webhook.ts         # Telegram webhook endpoint
+│   │       ├── github.ts          # GitHub webhook endpoint
+│   │       ├── heygen-webhook.ts  # HeyGen callback endpoint
+│   │       ├── setup.ts           # Bot initialization
+│   │       ├── migrate.ts         # Database migrations
+│   │       └── media.ts           # R2 media serving
 │   ├── migrations/                # D1 SQL migrations
 │   ├── schema.sql                 # Full database schema
-│   └── wrangler.toml
-│
-├── twitter-poller/                # Background polling worker
-│   ├── src/
-│   │   ├── index.ts               # Cron entry point
-│   │   └── services/
-│   │       ├── poller.ts          # Main polling pipeline
-│   │       ├── x-read.ts         # X API read operations
-│   │       ├── scoring.ts        # AI relevance scoring
-│   │       ├── batch-notification.ts # Telegram batch cards
-│   │       ├── auto-approve.ts   # Auto-generate + approve
-│   │       ├── repost-generate.ts # Content generation
-│   │       ├── db.ts             # Database operations
-│   │       └── telegram.ts       # Notification sender
 │   └── wrangler.toml
 │
 └── README.md
@@ -448,17 +416,19 @@ commit-content-creatore/
 | Bot Interface | Telegram Bot API |
 | Social Platform | X/Twitter API v2 + v1.1 (OAuth 1.0a) |
 | Video | HeyGen API v2 (transitioning to Seedance 2.0) |
+| Encryption | AES-256-GCM (Web Crypto API) |
 | Language | TypeScript 5.7 |
 | Build | Wrangler |
 
 ### Database
 
-30+ indexed tables across 4 domains:
+Indexed tables across 5 domains:
 
+- **Users**: `users` (identity, encrypted keys, settings, UI state)
 - **Content**: `drafts`, `published`, `repos`, `repo_overviews`
 - **Twitter**: `twitter_accounts`, `twitter_tweets`, `twitter_account_overviews`
 - **Video**: `video_drafts`, `video_published`, `video_presets`
-- **System**: `chat_state`, `persona_cache`
+- **System**: `persona_cache`
 
 ---
 
@@ -466,11 +436,12 @@ commit-content-creatore/
 
 Muse is designed to be **your bot, on your infrastructure**:
 
-- **You own your API keys** — credentials never leave your Cloudflare account
+- **Users own their API keys** — each user provides and manages their own credentials, encrypted at rest with AES-256-GCM
 - **You own your data** — everything lives in your D1 database and R2 bucket
 - **You control the costs** — Cloudflare's free tier is generous (100K Worker requests/day, 5GB D1, 10GB R2)
-- **You decide what publishes** — nothing goes live without your approval (unless you enable auto-approve)
-- **Zero vendor lock-in on content** — your tweets, your drafts, your images, all accessible in your database
+- **You decide what publishes** — nothing goes live without approval (unless auto-approve is enabled)
+- **Zero vendor lock-in on content** — tweets, drafts, images, all accessible in your database
+- **Multi-tenant by design** — one bot instance serves multiple users, each with isolated data
 
 ---
 

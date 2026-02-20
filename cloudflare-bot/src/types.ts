@@ -611,6 +611,7 @@ export interface InlineButton {
 export interface ViewResult {
     text: string;
     keyboard: InlineButton[][];
+    disableLinkPreview?: boolean;
 }
 
 // Telegram message

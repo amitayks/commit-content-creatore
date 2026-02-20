@@ -59,6 +59,8 @@ export async function handleCallback(
         // Truncate text to Telegram's limits
         const safeText = truncateHtml(view.text, 4096);
 
+        const linkOpts = view.disableLinkPreview ? { disableLinkPreview: true } : undefined;
+
         if (isPhotoMessage && prefix === 'action') {
             // Action on a draft with image — update caption in place to keep the photo
             const caption = truncateHtml(safeText, 1024);
@@ -68,9 +70,9 @@ export async function handleCallback(
             try {
                 await deleteMessage(env, chatId, messageId);
             } catch { /* ignore */ }
-            await sendMessage(env, chatId, safeText, view.keyboard);
+            await sendMessage(env, chatId, safeText, view.keyboard, linkOpts);
         } else {
-            await editMessage(env, chatId, messageId, safeText, view.keyboard);
+            await editMessage(env, chatId, messageId, safeText, view.keyboard, linkOpts);
         }
     } catch (error) {
         const errDetail = error instanceof Error ? (error.stack || error.message) : String(error);

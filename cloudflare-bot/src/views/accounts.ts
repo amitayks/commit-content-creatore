@@ -31,7 +31,7 @@ Add a Twitter/X account to start auto-detecting new tweets for repost!`,
     const accountList = accounts.map((a, i) => {
         const status = a.is_watching ? '👁' : '⏸️';
         const name = a.display_name ? ` (${a.display_name})` : '';
-        return `${offset + i + 1}. ${status} @${a.username}${name}`;
+        return `${offset + i + 1}. ${status} <a href="https://x.com/${a.username}">@${a.username}</a>${name}`;
     }).join('\n');
 
     const accountButtons: InlineButton[][] = accounts.map((a) => [
@@ -61,6 +61,7 @@ Tap an account to manage settings.${totalPages > 1 ? `\n\nPage ${page + 1} of ${
             navButtons.length > 0 ? navButtons : [],
             [{ text: '🏠 Home', callback_data: 'view:home' }],
         ].filter((row) => row.length > 0),
+        disableLinkPreview: true,
     };
 }
 
@@ -111,7 +112,7 @@ export async function renderAccountDetail(env: Env, chatId: string, accountId: s
     const displayName = account.display_name ? ` (${account.display_name})` : '';
 
     return {
-        text: `👤 <b>@${account.username}</b>${displayName}
+        text: `👤 <b><a href="https://x.com/${account.username}">@${account.username}</a></b>${displayName}
 ${watchStatus}
 
 <b>Repost Settings:</b>
@@ -150,7 +151,7 @@ Tap a setting to change it:`,
                 { text: `Media AI: ${mediaAiOn ? 'On' : 'Off'}`, callback_data: `tw_config:analyze_media:${account.id}`, style: mediaAiOn ? 'success' : 'danger' },
             ],
             [
-                { text: '🔍 Bootstrap Persona', callback_data: `action:tw_bootstrap:${account.id}` },
+                { text: overview?.persona ? '🔍 Update Persona' : '🔍 Bootstrap Persona', callback_data: `action:tw_bootstrap:${account.id}`, style: overview?.persona ? 'success' as const : 'primary' as const },
             ],
             [
                 account.is_watching
@@ -160,6 +161,7 @@ Tap a setting to change it:`,
             [{ text: 'Delete', callback_data: `action:tw_delete:${account.id}`, style: 'danger' }],
             [{ text: '◀️ Back', callback_data: 'view:accounts' }],
         ],
+        disableLinkPreview: true,
     };
 }
 
