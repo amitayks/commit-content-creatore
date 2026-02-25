@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: Dashboard shows next scheduled post
 The dashboard SHALL display the next scheduled post's title (or first tweet text), scheduled time, format, and PR number when a scheduled draft exists.
 
@@ -23,15 +21,34 @@ The dashboard SHALL display aggregate counts of drafts by status: total drafts, 
 - **THEN** the dashboard SHALL show zero counts or omit the stats line
 
 ### Requirement: Dashboard is async with DB access
-The `renderHome()` function SHALL accept `env` and `chatId` parameters and query the database for scheduled drafts and status counts.
+`renderHome(env, chatId)` SHALL accept an additional `isAdmin` boolean parameter (or resolve it internally) to conditionally render the Video Studio button. It SHALL query the database for scheduled drafts and status counts.
 
-#### Scenario: Dashboard loads with DB context
-- **WHEN** `renderHome(env, chatId)` is called
-- **THEN** it SHALL query for the next scheduled draft and draft status counts
+#### Scenario: Dashboard renders for admin
+- **WHEN** `renderHome` is called with admin user's chatId
+- **THEN** the rendered buttons include Video Studio
+- **AND** it SHALL query for the next scheduled draft and draft status counts
+- **AND** return a ViewResult with the populated dashboard
+
+#### Scenario: Dashboard renders for regular user
+- **WHEN** `renderHome` is called with a non-admin user's chatId
+- **THEN** the rendered buttons do NOT include Video Studio
+- **AND** it SHALL query for the next scheduled draft and draft status counts
 - **AND** return a ViewResult with the populated dashboard
 
 ### Requirement: Dashboard buttons include dynamic navigation
-The dashboard SHALL show contextual buttons based on queue state: "View Schedule" button when scheduled posts exist, and always show Handwrite, Generate, Drafts, Repos, and Help.
+The dashboard SHALL conditionally show the Video Studio button based on admin status.
+- Always show: Handwrite, Generate, Drafts, Repos, Accounts, Settings, Help
+- Show Video Studio button ONLY when `isAdmin(chatId, env)` returns true
+- Scheduled posts exist: show "View Schedule" button
+- No scheduled posts: omit "View Schedule" button
+
+#### Scenario: Admin views dashboard
+- **WHEN** admin user views the home dashboard
+- **THEN** the Video Studio button is displayed with `callback_data: 'view:video_studio'` alongside all standard buttons
+
+#### Scenario: Regular user views dashboard
+- **WHEN** a non-admin user views the home dashboard
+- **THEN** the Video Studio button is NOT displayed, all standard buttons are shown
 
 #### Scenario: Scheduled posts exist
 - **WHEN** the dashboard renders with scheduled drafts
@@ -45,3 +62,8 @@ The dashboard SHALL show contextual buttons based on queue state: "View Schedule
 - **WHEN** the dashboard renders
 - **THEN** a "✍️ Handwrite" button SHALL always be shown with `callback_data: 'view:handwrite'`
 - **AND** it SHALL appear in the same row as the "⚡ Generate" button
+
+#### Scenario: Accounts button always shown
+- **WHEN** the dashboard renders
+- **THEN** a "👤 Accounts" button SHALL always be shown with `callback_data: 'view:accounts'`
+- **AND** it SHALL appear in the same row as the "📦 Repos" button

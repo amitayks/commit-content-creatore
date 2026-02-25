@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: Views split into domain-specific files
 The monolithic `views/index.ts` SHALL be split into domain-specific modules: `views/home.ts` for general views, `views/drafts.ts` for draft-related views, and `views/repos.ts` for repository-related views.
 
@@ -32,13 +30,13 @@ Each view function SHALL maintain its exact current signature and return type (`
 - **THEN** it returns the same `ViewResult` with identical text and keyboard as the current implementation
 
 ### Requirement: Draft categories navigation view
-The system SHALL provide a `renderDraftCategories(env, chatId)` view that shows draft category buttons with counts: Auto-generated, Handwritten, Approved (ready to publish), and Scheduled.
+The system SHALL provide a `renderDraftCategories(env, chatId)` view that shows draft category buttons with counts: Auto-generated, Handwritten, RePosts, Approved (ready to publish), Scheduled, and Published.
 
 #### Scenario: Categories with drafts
 - **WHEN** `renderDraftCategories()` is called and drafts exist
 - **THEN** it SHALL show buttons for each category with their count in parentheses
 - **AND** buttons SHALL be stacked vertically (one per row)
-- **AND** categories SHALL include: Auto-generated, Handwritten, Approved, Scheduled
+- **AND** categories SHALL include: Auto-generated, Handwritten, RePosts, Approved, Scheduled, Published
 
 #### Scenario: Empty state
 - **WHEN** `renderDraftCategories()` is called and no drafts exist
@@ -90,7 +88,11 @@ The `renderDraftsList()` function SHALL accept an optional status filter paramet
 
 #### Scenario: Auto-generated filter
 - **WHEN** `renderDraftsList()` is called with filter `auto`
-- **THEN** it SHALL show drafts with status `draft` or `rejected`
+- **THEN** it SHALL show drafts with source 'auto' and status `draft` or `rejected`
+
+#### Scenario: Repost filter
+- **WHEN** `renderDraftsList()` is called with filter `repost`
+- **THEN** it SHALL show drafts with source 'repost' and status `draft` or `rejected`
 
 #### Scenario: Approved filter
 - **WHEN** `renderDraftsList()` is called with filter `approved`
@@ -201,3 +203,102 @@ The `renderDraftDetail()` view SHALL indicate which tweets have attached media w
 #### Scenario: Handwritten draft with media
 - **WHEN** `renderDraftDetail()` displays a handwritten thread where some tweets have media
 - **THEN** tweets with media SHALL show a 📷 indicator next to the tweet text in the preview
+
+### Requirement: Draft categories view
+The home dashboard SHALL conditionally render the Video Studio button. It is shown ONLY when `isAdmin(chatId, env)` returns true. All other buttons (Handwrite, Generate, Drafts, Repos, Accounts, Settings, Help) are shown to all users.
+
+#### Scenario: Admin user views home
+- **WHEN** an admin user views the home dashboard
+- **THEN** the Video Studio button is displayed alongside all other buttons
+
+#### Scenario: Regular user views home
+- **WHEN** a non-admin user views the home dashboard
+- **THEN** the Video Studio button is NOT displayed, all other buttons are shown
+
+### Requirement: Video Studio home includes Video Settings button
+The Video Studio home screen SHALL include a "Video Settings" button that navigates to the video settings sub-section (characters, defaults, HeyGen account, Instagram).
+
+#### Scenario: Admin opens Video Studio
+- **WHEN** admin navigates to Video Studio home
+- **THEN** the screen shows the repo list, Standalone Video button, AND a "Video Settings" button
+
+### Requirement: Safety check on video_studio view
+The `view:video_studio` handler SHALL check `isAdmin(chatId, env)` and return a "not available" message if the requesting user is not admin.
+
+#### Scenario: Non-admin triggers video_studio view
+- **WHEN** a non-admin user somehow triggers `view:video_studio` callback
+- **THEN** the bot responds with "This feature is not available" and does not render Video Studio
+
+### Requirement: Accounts list view
+The system SHALL provide a `renderAccountsList(env, chatId, page)` view that displays followed Twitter accounts with pagination (10 per page). Each account SHALL be a single button showing `👤 @username` with watching/paused status. An "➕ Add account" button SHALL appear at the top.
+
+#### Scenario: Accounts list with items
+- **WHEN** `renderAccountsList(env, chatId, 0)` is called with 3 accounts
+- **THEN** it SHALL return ViewResult with text "👤 Followed Accounts (3 total)" and buttons for each account
+
+#### Scenario: Account button format
+- **WHEN** an account @vercel is watching
+- **THEN** its button SHALL be `{ text: '👤 @vercel', callback_data: 'account:ACCOUNT_ID' }`
+
+#### Scenario: Paused account
+- **WHEN** an account @vercel has `is_watching=0`
+- **THEN** its button SHALL be `{ text: '👤 @vercel (paused)', callback_data: 'account:ACCOUNT_ID' }`
+
+### Requirement: Account detail view
+The system SHALL provide a `renderAccountDetail(env, chatId, accountId)` view showing account info and config toggle buttons. Layout SHALL include: account name/username header, watching status, overview status, and settings toggles.
+
+#### Scenario: Account detail with overview
+- **WHEN** account has a bootstrapped overview
+- **THEN** the view SHALL show overview summary and a "🔄 Re-bootstrap" button
+
+#### Scenario: Account detail without overview
+- **WHEN** account has no overview
+- **THEN** the view SHALL show "No overview yet" and a "🔍 Bootstrap Overview" button
+
+#### Scenario: Settings buttons layout
+- **WHEN** account detail is rendered
+- **THEN** settings buttons SHALL include: [🌐 Lang] [#️⃣ Tags], [🖼 Img] [🎲 N%], [📊 Threshold: N] [🎭 Tone], [✅ Auto-approve: ON/OFF], [⏸️ Stop watching / 👁 Start watching], [🗑️ Delete], [◀️ Back]
+
+### Requirement: Add account input view
+The system SHALL provide a `renderAddAccount()` view prompting the user to send an @username. It SHALL include a Cancel button returning to the accounts list.
+
+#### Scenario: Add account prompt
+- **WHEN** `renderAddAccount()` is called
+- **THEN** it SHALL return: text "➕ Add Account\n\nSend me the Twitter/X @username to follow" with a Cancel button
+
+### Requirement: RePosts category in draft categories
+The `renderDraftCategories()` view SHALL include a "🔄 RePosts (N)" button showing the count of repost drafts with status 'draft' or 'rejected'. The callback SHALL be `view:drafts_repost`.
+
+#### Scenario: RePosts with drafts
+- **WHEN** 5 repost drafts exist with status 'draft' or 'rejected'
+- **THEN** the categories view SHALL show "🔄 RePosts (5)" button
+
+#### Scenario: RePosts empty
+- **WHEN** no repost drafts exist
+- **THEN** the categories view SHALL still show "🔄 RePosts (0)" button
+
+### Requirement: Repost draft list view
+The `renderDraftsList()` function SHALL support `listType='repost'` to show only drafts with `source='repost'` and status in ('draft', 'rejected'). Pagination callbacks SHALL use `page:repost:N`. The short code for repost list type SHALL be `'r'`.
+
+#### Scenario: Repost list rendering
+- **WHEN** `renderDraftsList(env, chatId, 0, 'repost', 5)` is called
+- **THEN** it SHALL query drafts where `source='repost'` and `status IN ('draft', 'rejected')`
+
+#### Scenario: Repost draft title format
+- **WHEN** a repost draft has `pr_title='@vercel | Next.js 15.3 is here with major...'`
+- **THEN** the list button SHALL show `🔄 @vercel — Next.js 15.3 is here with...`
+
+### Requirement: Repost draft detail view
+The `renderDraftDetail()` view SHALL handle repost drafts by showing: "🔄 from @username" header, embedded link to original tweet, status line, format, and draft content. Action buttons SHALL match existing draft status patterns.
+
+#### Scenario: Repost draft detail
+- **WHEN** `renderDraftDetail()` is called for a repost draft
+- **THEN** the header SHALL show "🔄 from @username"
+- **AND** an "🔗 Original Tweet" URL button SHALL link to the `original_tweet_url`
+
+### Requirement: Accounts views in views barrel export
+The `views/index.ts` barrel file SHALL re-export `renderAccountsList`, `renderAccountDetail`, and `renderAddAccount` from `views/accounts.ts`.
+
+#### Scenario: Import from barrel
+- **WHEN** code imports from `../views/index`
+- **THEN** account view functions SHALL be available

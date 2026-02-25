@@ -1,42 +1,23 @@
 # Telegram Bot Authorization
 
-## ADDED Requirements
-
 ### Requirement: Single-User Authorization
-The Telegram bot SHALL only accept commands and interactions from the authorized user configured via the `TELEGRAM_CHAT_ID` environment variable. All Telegram update types MUST be protected.
+The webhook entry point SHALL authorize users by looking up their `chat_id` in the `users` table. Users with `status = 'active'` are authorized for all features. Users with `status = 'onboarding'` are redirected to the onboarding flow. Users with `status = 'suspended'` receive a suspension message. Unregistered users (no `users` row) enter the onboarding flow. The `isAdmin(chatId, env)` function (`String(chatId) === env.TELEGRAM_CHAT_ID`) is used only for admin-specific features (Video Studio, admin endpoints), not for general authorization.
 
-#### Scenario: Authorized user sends text message
-- **WHEN** a Telegram user with ID matching `TELEGRAM_CHAT_ID` sends a text message
-- **THEN** the message SHALL be processed normally
-- **AND** the user SHALL receive the expected response
+#### Scenario: Active registered user sends a message
+- **WHEN** a user with `status = 'active'` in the `users` table sends a message
+- **THEN** the message is authorized and routed to handlers normally
 
-#### Scenario: Authorized user sends slash command
-- **WHEN** a Telegram user with ID matching `TELEGRAM_CHAT_ID` sends a command like `/start`, `/generate`, `/drafts`
-- **THEN** the command SHALL be processed normally
-- **AND** the user SHALL receive the expected response
+#### Scenario: Unregistered user sends a message
+- **WHEN** a user with no row in the `users` table sends any message
+- **THEN** a `users` row is created with `status = 'onboarding'` and the onboarding flow begins
 
-#### Scenario: Authorized user clicks inline button
-- **WHEN** a Telegram user with ID matching `TELEGRAM_CHAT_ID` clicks an inline button (callback query)
-- **THEN** the callback SHALL be processed normally
-- **AND** the UI SHALL update accordingly
+#### Scenario: Onboarding user sends a message
+- **WHEN** a user with `status = 'onboarding'` sends a message
+- **THEN** the message is routed to the onboarding handler at the user's current step
 
-#### Scenario: Unauthorized user sends text message
-- **WHEN** a Telegram user with ID NOT matching `TELEGRAM_CHAT_ID` sends a text message
-- **THEN** the request SHALL be rejected before any handler is invoked
-- **AND** the user SHALL receive a generic "unauthorized" message
-- **AND** no sensitive information SHALL be revealed in the response
-
-#### Scenario: Unauthorized user sends slash command
-- **WHEN** a Telegram user with ID NOT matching `TELEGRAM_CHAT_ID` sends any slash command
-- **THEN** the request SHALL be rejected before the command handler is invoked
-- **AND** the user SHALL receive the same generic "unauthorized" message
-- **AND** the response SHALL NOT reveal which commands exist
-
-#### Scenario: Unauthorized user clicks inline button
-- **WHEN** a Telegram user with ID NOT matching `TELEGRAM_CHAT_ID` clicks an inline button
-- **THEN** the callback SHALL be rejected before any handler is invoked
-- **AND** the callback SHALL be answered with an error notification
-- **AND** no data SHALL be accessed or modified
+#### Scenario: Suspended user sends a message
+- **WHEN** a user with `status = 'suspended'` sends a message
+- **THEN** the bot responds with a suspension notice and does not process the message
 
 ### Requirement: User ID Extraction
 The system SHALL extract the user ID from the correct field based on update type.
@@ -71,22 +52,15 @@ The authorization check SHALL occur at the webhook entry point before any handle
 - **AND** no business logic SHALL run for unauthorized users
 
 ### Requirement: Database-Level Ownership
-All data tables SHALL track ownership via `chat_id` column as a second line of defense.
+All database tables (`drafts`, `repos`, `published`, `video_drafts`, `video_published`, `video_presets`, `twitter_accounts`, `twitter_tweets`, `users`) carry a `chat_id` column. All read and write operations SHALL filter by `chat_id` to ensure data isolation between users.
 
-#### Scenario: Drafts table has owner
-- **WHEN** a draft is created
-- **THEN** the `chat_id` of the creating user SHALL be stored with the draft
-- **AND** the draft SHALL only be retrievable by queries that match this `chat_id`
+#### Scenario: User queries their drafts
+- **WHEN** a user requests their drafts list
+- **THEN** only drafts with matching `chat_id` are returned
 
-#### Scenario: Repos table has owner
-- **WHEN** a repo is added to watch list
-- **THEN** the `chat_id` of the adding user SHALL be stored with the repo
-- **AND** the repo SHALL only be retrievable by queries that match this `chat_id`
-
-#### Scenario: Published table has owner
-- **WHEN** a published record is created
-- **THEN** the `chat_id` of the publishing user SHALL be stored with the record
-- **AND** the record SHALL only be retrievable by queries that match this `chat_id`
+#### Scenario: User cannot access another user's data
+- **WHEN** a user's request is processed
+- **THEN** all DB queries include `WHERE chat_id = ?` with the requesting user's chat_id
 
 ### Requirement: Database Query Filtering
 All database read operations SHALL require and filter by `chat_id`.
@@ -258,3 +232,124 @@ Application logs SHALL NOT contain sensitive information.
 - **WHEN** errors are logged for debugging
 - **THEN** full stack traces MAY be logged server-side
 - **AND** request bodies containing sensitive data SHALL be redacted
+
+### Requirement: Video Studio callback routes
+The Telegram bot callback handler SHALL recognize and route video studio callback data patterns: `view:video_studio`, `view:video_repo:{repoId}`, `view:video_list:{repoId}:{status}`, `view:video_detail:{videoDraftId}`, `action:video_create:{repoId}`, `action:video_config:{field}:{value}`, `action:video_approve_script:{videoDraftId}`, `action:video_regen_script`, `action:video_publish:{videoDraftId}`, `action:video_schedule:{videoDraftId}`, `action:video_delete:{videoDraftId}`, `action:video_engine:{engine}`, `action:video_emotion:{emotion}`, `action:video_captions:{on|off}`, `action:video_overlay:{on|off}`, `action:video_bg:{type}`.
+
+#### Scenario: Navigate to Video Studio
+- **WHEN** a callback with data `view:video_studio` is received
+- **THEN** the handler SHALL render the Video Studio home view
+
+#### Scenario: Navigate to repo video list
+- **WHEN** a callback with data `view:video_repo:{repoId}` is received
+- **THEN** the handler SHALL render the repo's video category view
+
+#### Scenario: Navigate to video detail
+- **WHEN** a callback with data `view:video_detail:{videoDraftId}` is received
+- **THEN** the handler SHALL render the video detail view for the specified draft
+
+#### Scenario: Video action callbacks
+- **WHEN** a callback with data matching `action:video_*` is received
+- **THEN** the handler SHALL execute the corresponding video action (publish, schedule, delete, approve, regenerate, engine toggle, emotion select, etc.)
+
+### Requirement: Video compose mode state
+The chat_state context SHALL support a `videoCompose` state for manual instructions input, tracking: whether video compose is active, the target repo ID, the buffered instructions, and the current video configuration being built.
+
+#### Scenario: Enter video compose mode
+- **WHEN** user clicks "Manual Instructions" in video config
+- **THEN** `chat_state.context.videoCompose` SHALL be set to `{ active: true, repoId, instructions: [], config: {...} }`
+
+#### Scenario: Exit video compose mode
+- **WHEN** user clicks "Save" or "Cancel" in video compose mode
+- **THEN** `chat_state.context.videoCompose.active` SHALL be set to false
+
+#### Scenario: Message routing during video compose
+- **WHEN** a text message is received and `videoCompose.active` is true
+- **THEN** the message SHALL be routed to the video compose handler (not the regular message handler)
+
+### Requirement: Character creation compose mode
+The chat_state context SHALL support a `characterCreate` state for the character creation flow through the bot.
+
+#### Scenario: Enter character creation mode
+- **WHEN** user clicks "Add Character" in video settings
+- **THEN** `chat_state.context.characterCreate` SHALL be set to `{ active: true, step: 'awaiting_photo' }`
+
+#### Scenario: Character creation photo step
+- **WHEN** a photo is received and `characterCreate.active` is true and `step` is 'awaiting_photo'
+- **THEN** the photo SHALL be uploaded to HeyGen via the asset upload API
+- **AND** `characterCreate.step` SHALL be set to 'awaiting_name'
+- **AND** `characterCreate.assetId` SHALL be stored
+
+#### Scenario: Character creation name step
+- **WHEN** a text message is received and `characterCreate.active` is true and `step` is 'awaiting_name'
+- **THEN** the avatar group SHALL be created on HeyGen with the provided name
+- **AND** the default look training SHALL be started
+- **AND** `characterCreate.active` SHALL be set to false
+
+#### Scenario: Cancel character creation
+- **WHEN** user sends "Cancel" or a slash command during character creation
+- **THEN** `characterCreate.active` SHALL be set to false
+- **AND** any uploaded assets SHALL be abandoned (not cleaned up on HeyGen)
+
+### Requirement: Look creation compose mode
+The chat_state context SHALL support a `lookCreate` state for the look creation flow through the bot.
+
+#### Scenario: Enter look creation mode
+- **WHEN** user clicks "Add Look" for a character in video settings
+- **THEN** `chat_state.context.lookCreate` SHALL be set to `{ active: true, characterGroupId: string, step: 'awaiting_name' }`
+
+#### Scenario: Look creation name step
+- **WHEN** a text message is received and `lookCreate.active` is true and `step` is 'awaiting_name'
+- **THEN** the talking photo SHALL be generated on HeyGen with the provided name
+- **AND** `lookCreate.active` SHALL be set to false
+
+### Requirement: HeyGen webhook endpoint
+The Worker SHALL expose a `/heygen-webhook` HTTP POST endpoint that receives HeyGen callback notifications for video generation events.
+
+#### Scenario: Webhook routing
+- **WHEN** a POST request is received at `/heygen-webhook`
+- **THEN** the Worker's fetch handler SHALL route it to the HeyGen webhook handler
+- **AND** this SHALL be separate from the Telegram webhook route
+
+#### Scenario: Webhook response
+- **WHEN** the webhook handler processes a callback
+- **THEN** it SHALL return a 200 OK response promptly (within the Worker timeout)
+- **AND** perform video download, R2 storage, DB update, and Telegram notification
+
+#### Scenario: Invalid webhook request
+- **WHEN** a POST to `/heygen-webhook` contains no recognizable video_id or doesn't match any generating draft
+- **THEN** the handler SHALL return 400 Bad Request
+- **AND** log the rejected request for debugging
+
+### Requirement: Video cron integration
+The existing cron handler SHALL be extended to serve as a fallback safety net for webhook-based video processing.
+
+#### Scenario: Cron checks for stale generating videos (webhook fallback)
+- **WHEN** the hourly cron runs and there are video drafts with status "generating" for more than 30 minutes
+- **THEN** the handler SHALL call `checkVideoStatus()` via HeyGen API for each
+- **AND IF** HeyGen reports completed → download + store + update status + notify user (webhook was missed)
+- **AND IF** HeyGen reports still processing → leave as-is if under 30 min, mark failed if over
+- **AND IF** HeyGen reports failed → update status to "failed" + notify user
+
+#### Scenario: Cron processes queued videos
+- **WHEN** the hourly cron runs and there are no "generating" video drafts but there are "queued" ones
+- **THEN** the handler SHALL start the oldest queued draft by sending it to HeyGen
+- **AND** update status to "generating"
+
+#### Scenario: Cron publishes scheduled videos
+- **WHEN** the hourly cron runs and there are video drafts with status "scheduled" and `scheduled_at <= NOW()`
+- **THEN** the handler SHALL publish each due video to the configured platforms
+- **AND** update status to "published"
+- **AND** notify user via Telegram with publish URLs
+
+### Requirement: Message routing priority
+The Telegram message handler SHALL check for active compose modes in priority order before handling as a regular message.
+
+#### Scenario: Compose mode priority
+- **WHEN** a message is received
+- **THEN** the handler SHALL check in order:
+  1. `characterCreate.active` — route to character creation handler
+  2. `lookCreate.active` — route to look creation handler
+  3. `videoCompose.active` — route to video compose handler
+  4. Existing compose modes (handwrite, etc.)
+  5. Regular message handling

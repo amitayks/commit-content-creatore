@@ -1,5 +1,3 @@
-## ADDED Requirements
-
 ### Requirement: Schedule input applies user timezone
 When a user enters a schedule datetime, the system SHALL interpret it in the user's configured timezone and convert to UTC for storage.
 
@@ -46,3 +44,14 @@ The past-time check for schedule input SHALL compare against the current time in
 #### Scenario: User in UTC+2 checks for past time
 - **WHEN** it is 10:00 UTC (12:00 local) and user in "UTC+2" enters "11:00"
 - **THEN** the system rejects it as past (11:00 local < 12:00 local)
+
+### Requirement: Timezone stored per user
+The system SHALL store the timezone offset as a string in the `users` table `timezone` column (instead of `chat_state`), defaulting to `'UTC'`.
+
+#### Scenario: New user has default timezone
+- **WHEN** a new user completes onboarding
+- **THEN** their `users.timezone` column is `'UTC'` by default
+
+#### Scenario: Timezone read from users table
+- **WHEN** `getTimezone(env, chatId)` is called
+- **THEN** it reads from `users` table WHERE `chat_id = ?`, returning the `timezone` column value

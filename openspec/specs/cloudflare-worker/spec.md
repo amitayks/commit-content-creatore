@@ -1,7 +1,5 @@
 # Cloudflare Worker Security
 
-## ADDED Requirements
-
 ### Requirement: Worker Entry Point Security
 All HTTP endpoints exposed by the Cloudflare Worker SHALL implement appropriate security controls.
 
@@ -23,26 +21,15 @@ All HTTP endpoints exposed by the Cloudflare Worker SHALL implement appropriate 
 - **AND** `X-XSS-Protection: 1; mode=block` header SHALL be included
 
 ### Requirement: Environment Secret Management
-All sensitive credentials SHALL be stored securely and never exposed.
+All shared infrastructure keys/tokens SHALL be stored as Cloudflare secrets: `TELEGRAM_BOT_TOKEN`, `ENCRYPTION_KEY`, `ADMIN_SECRET`, `GITHUB_WEBHOOK_SECRET`, `TELEGRAM_CHAT_ID`. Per-user API keys (`GOOGLE_API_KEY`, `X_API_KEY`, `X_API_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_SECRET`, `GITHUB_TOKEN`, `HEYGEN_API_KEY`) SHALL be stored encrypted in D1 `users` table and resolved per-request via env hydration. The `Env` interface SHALL include `ENCRYPTION_KEY: string` and `MAX_USERS?: string`.
 
-#### Scenario: Secrets stored in Cloudflare
-- **WHEN** the worker is deployed
-- **THEN** all API keys and tokens SHALL be stored as Cloudflare secrets
-- **AND** secrets SHALL NOT be hardcoded in source code
-- **AND** secrets SHALL NOT be committed to version control
+#### Scenario: Per-user keys not in Worker secrets
+- **WHEN** the Worker is deployed
+- **THEN** per-user API keys are NOT stored as Worker secrets — they exist only in D1 encrypted
 
-#### Scenario: Secrets not logged
-- **WHEN** any logging occurs in the worker
-- **THEN** environment secrets SHALL NOT be included in log output
-- **AND** `TELEGRAM_BOT_TOKEN` SHALL NOT be logged
-- **AND** `GITHUB_TOKEN` SHALL NOT be logged
-- **AND** `GROK_API_KEY` SHALL NOT be logged
-- **AND** `X_API_KEY` and `X_API_SECRET` SHALL NOT be logged
-
-#### Scenario: Secrets not in error responses
-- **WHEN** an error response is returned
-- **THEN** no environment secrets SHALL be included in the response body
-- **AND** no API keys or tokens SHALL be revealed
+#### Scenario: ENCRYPTION_KEY in Worker secrets
+- **WHEN** the Worker starts
+- **THEN** `env.ENCRYPTION_KEY` is available as a Worker secret for encrypting/decrypting user keys
 
 ### Requirement: Request Validation
 All incoming requests SHALL be validated before processing.
@@ -128,3 +115,14 @@ All HTTP responses SHALL follow security best practices.
 - **THEN** `Cache-Control` SHALL have appropriate directives
 - **AND** private data SHALL use `private` directive
 - **AND** authentication-required resources SHALL use `no-store`
+
+### Requirement: users table replaces chat_state
+The D1 database SHALL have a `users` table that combines user identity, encrypted keys, UI state, and settings. The `chat_state` table SHALL be dropped after data migration.
+
+#### Scenario: users table exists after migration
+- **WHEN** the migration runs
+- **THEN** the `users` table exists with columns for identity, encrypted keys, feature flags, UI state, settings, rate limiting, and timestamps
+
+#### Scenario: chat_state data preserved
+- **WHEN** the migration runs and an existing `chat_state` row exists
+- **THEN** the UI state and settings data (message_id, current_view, context, timezone, page_size, video_settings) is copied to the corresponding `users` row
